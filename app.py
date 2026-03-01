@@ -57,7 +57,7 @@ def get_processed_data(file_path):
 # 2. 模型自動訓練/載入模塊 (防止 Demo 崩潰)
 # ==========================================
 @st.cache_resource
-def get_model_safe(df):
+def get_model_safe(_df):
     model_path = "probms_model.pkl"
     features = ["Cycle_Index", "Cap", "IR", "CV_Ratio"] # 簡化特徵供 Demo
     
@@ -67,8 +67,8 @@ def get_model_safe(df):
         # 如果沒模型，現地訓練一個簡單的做預測
         st.sidebar.warning("⚠️ 沒發現 pkl，已自動啟動現地模型補償...")
         sc = StandardScaler()
-        X = sc.fit_transform(df[features])
-        y = df["RUL"]
+        X = sc.fit_transform(_df[features])
+        y = _df["RUL"]
         
         reg = xgb.XGBRegressor(n_estimators=50).fit(X, y)
         return {"clf_xgb": reg, "sc": sc, "features": features, "max_clip": y.max()}
