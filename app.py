@@ -154,15 +154,19 @@ col_main, col_side = st.columns([2.5, 1.5])
 with col_main:
     st.markdown("##### 📉 單調衰減軌跡圖 (Monotonic Decay Path)")
     fig_line = go.Figure()
-    # 歷史軌跡
+    # 歷史軌跡 (確保有數值)
+    hist_x = batt_df.index[:current_idx+1]
+    hist_y = batt_df['RUL'].iloc[:current_idx+1]
     fig_line.add_trace(go.Scatter(
-        x=batt_df.index[:current_idx+1], y=batt_df['RUL'][:current_idx+1],
+        x=hist_x, y=hist_y,
         name="歷史已發生衰退", mode='lines+markers',
         line=dict(color='#00ffcc', width=3), marker=dict(size=4)
     ))
-    # AI 預測軌跡
+    # AI 預測軌跡 (確保有數值)
+    pred_x = batt_df.index[current_idx:]
+    pred_y = batt_df['RUL'].iloc[current_idx:]
     fig_line.add_trace(go.Scatter(
-        x=batt_df.index[current_idx:], y=batt_df['RUL'][current_idx:],
+        x=pred_x, y=pred_y,
         name="物理感知 AI 預測", mode='lines',
         line=dict(color='#ff4b4b', dash='dash', width=2)
     ))
@@ -178,12 +182,14 @@ with col_main:
 
 with col_side:
     st.markdown("##### 🕸️ 物理健康雷達圖 (Physics Radar)")
-    # 將數據轉換為雷達圖所需的相對比例 (0-100)
-    radar_soh = row['SOH_Percentage']
+    # 處理可能出現 NaN 的情況並轉換為 float
+    radar_soh = float(row.get('SOH_Percentage', 100))
     # 假設內阻最高約 0.8V，反轉它讓 100 代表健康
-    radar_res = max(0, 100 - (row['IR_Proxy'] / 0.8) * 100)
+    ir_val_safe = float(row.get('IR_Proxy', 0))
+    radar_res = max(0.0, 100.0 - (ir_val_safe / 0.8) * 100.0)
     # 極化因子轉換
-    radar_pol = max(0, 100 - row['CV_Ratio_EMA'] * 100)
+    pol_val_safe = float(row.get('CV_Ratio_EMA', 0))
+    radar_pol = max(0.0, 100.0 - pol_val_safe * 100.0)
     
     radar_data = pd.DataFrame(dict(
         r=[radar_soh, radar_res, radar_pol],
@@ -262,12 +268,3 @@ with col_diag2:
         st.markdown(f"- {msg}")
     
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("##### 📁 原始感測數據截錄 (Sensor Data Stream)")
-    # 顯示當前與過去總共 5 筆的資料
-    st.dataframe(
-        batt_df.iloc[max(0, current_idx-4):current_idx+1][
-            ["Cycle_Index", "RUL", "Discharge Time (s)", "Max. Voltage Dischar. (V)", "Charging time (s)"]
-        ].style.background_gradient(cmap="Blues", axis=0),
-        use_container_width=True,
-        height=150
-    )
