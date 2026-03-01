@@ -136,22 +136,22 @@ def get_processed_data(file_path):
 # 1.5. 輕量化訓練管線 (Lightweight Model Pipeline)
 # ==========================================
 @st.cache_resource(show_spinner="🧠 AI 模型訓練中：正在利用原始資料集擬合 Ridge + XGBoost 全局壽命模型...")
-def train_light_model(df_all):
-    base_feats = [c for c in ["Cap_EMA","IR_EMA","CV_Ratio_EMA","CC_Time_EMA"] if c in df_all.columns]
-    base_feats += [c for c in ["Cap_v1","IR_v1","CV_Ratio_v1"] if c in df_all.columns]
+def train_light_model(_df_all):
+    base_feats = [c for c in ["Cap_EMA","IR_EMA","CV_Ratio_EMA","CC_Time_EMA"] if c in _df_all.columns]
+    base_feats += [c for c in ["Cap_v1","IR_v1","CV_Ratio_v1"] if c in _df_all.columns]
     for col in ["Cap_EMA", "IR_EMA", "CV_Ratio_EMA"]:
         for w in [10, 20]:
             for suf in ["_rm", "_rs", "_slope"]:
-                if f"{col}{suf}{w}" in df_all.columns: base_feats.append(f"{col}{suf}{w}")
+                if f"{col}{suf}{w}" in _df_all.columns: base_feats.append(f"{col}{suf}{w}")
     clock_plus = ["Cum_Ah_log1p", "Cycle_Index"]
     feats = sorted(list(set(base_feats + clock_plus)))
     
-    y = df_all["RUL"].values.astype(float)
-    X = df_all[feats].values
+    y = _df_all["RUL"].values.astype(float)
+    X = _df_all[feats].values
 
     # Base Ridge
     sc_clock = StandardScaler()
-    X_c = sc_clock.fit_transform(df_all[clock_plus].values)
+    X_c = sc_clock.fit_transform(_df_all[clock_plus].values)
     base = Ridge(alpha=12.44)
     base.fit(X_c, y)
     yb = np.clip(base.predict(X_c), 0.0, y.max() * 1.1)
