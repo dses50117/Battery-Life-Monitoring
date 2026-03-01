@@ -11,59 +11,62 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.isotonic import IsotonicRegression
 
 # ==========================================
-# 0. 頁面配置與極致黑 SCADA 風格
+# 0. 頁面配置與高對比 SCADA 風格
 # ==========================================
 st.set_page_config(page_title="電池壽命監控看板", layout="wide")
 
 st.markdown("""
 <style>
+    /* 全局背景與文字 */
     .stApp { background-color: #000000; color: #ffffff; }
+    
+    /* 側邊欄文字、滑桿標籤、複選框文字強制改為白色 */
+    [data-testid="stSidebar"] section label { color: #ffffff !important; font-weight: bold; }
+    [data-testid="stSidebar"] .stMarkdown p { color: #ffffff !important; }
     [data-testid="stSidebar"] { background-color: #0a0a0a !important; border-right: 1px solid #1a1a1a; }
+    
     .pro-title { text-align: center; color: #00ffca; font-size: 1.6rem; font-weight: 500; margin-top: -20px; margin-bottom: 30px; }
     .kpi-container { text-align: center; padding: 15px; background: rgba(0, 255, 202, 0.03); border: 1px solid #1a1a1a; border-radius: 8px; }
     .kpi-value { font-size: 3rem; color: #00ffca; font-weight: 400; }
-    .kpi-label { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 1px; }
-    .chart-title { color: #ffffff; font-size: 1rem; border-left: 4px solid #00ffca; padding-left: 10px; margin-top: 10px; }
+    .kpi-label { font-size: 0.8rem; color: #ffffff; text-transform: uppercase; letter-spacing: 1px; }
+    .chart-title { color: #00ffca; font-size: 1rem; border-left: 4px solid #00ffca; padding-left: 10px; margin-top: 10px; }
     .terminal-log { font-family: 'Courier New', monospace; color: #00ffca; font-size: 0.85rem; padding: 10px; background: #050505; border-radius: 5px; border: 1px solid #1a1a1a; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 數據引擎：研究等級特徵工程 (修正 700% 問題)
+# 1. 數據引擎：研究等級特徵工程
 # ==========================================
-@st.cache_data(show_spinner="⏳ 正在同步 14 顆機櫃數據與物理特徵工程...")
+@st.cache_data(show_spinner="⏳ 正在同步機櫃數據與物理特徵工程...")
 def get_advanced_data(file_path):
     df = pd.read_csv(file_path)
     
-    # [1] 自動識別 14 顆電池
+    # [1] 自動識別電池 ID
     c = pd.to_numeric(df["Cycle_Index"], errors="coerce").fillna(0).values
     df["Battery_ID"] = np.cumsum((c[1:] <= c[:-1]).astype(int).tolist() + [0])
     df = df.sort_values(["Battery_ID", "Cycle_Index"]).reset_index(drop=True)
     df["Cycle_Index_Clean"] = df.groupby("Battery_ID").cumcount()
     
-    # [2] 基礎物理量映射
+    # [2] 基礎物理映射
     df["Cap"] = df["Discharge Time (s)"].astype(float)
     df["IR"]  = (4.2 - df["Max. Voltage Dischar. (V)"]).astype(float)
     df["CV_Ratio"] = (df["Time at 4.15V (s)"] / (df["Charging time (s)"] + 1e-6)).astype(float)
     df["VD"]  = df["Decrement 3.6-3.4V (s)"].astype(float)
     
-    # [3] 物理感知特徵 (EMA & Rolling)
+    # [3] 物理感知 (EMA)
     for col in ["Cap", "IR", "CV_Ratio"]:
         init = df.groupby("Battery_ID")[col].transform("first")
         df[f"{col}_Ret"] = df[col] / (init + 1e-6)
         df[f"{col}_EMA"] = df.groupby("Battery_ID")[f"{col}_Ret"].transform(lambda x: x.ewm(alpha=0.1, adjust=False).mean())
         df[f"{col}_rm20"] = df.groupby("Battery_ID")[f"{col}_EMA"].transform(lambda x: x.rolling(20, min_periods=1).mean())
     
-    # [4] 研究核心指標 (修正 SOH 700%：改用歷史最大值基準)
-    # 物理退化因子 (Tau)
+    # [4] SOH 修正邏輯 (以歷史最大值為基準)
+    df["Max_Cap_Found"] = df.groupby("Battery_ID")["Cap_EMA"].transform('max')
+    df["SOH"] = (df["Cap_EMA"] / df["Max_Cap_Found"]) * 100
     df["Tau"] = (1.0 / (1.0 + np.exp(-df["Cap_EMA"]))).clip(0.0, 1.0)
     df["Cum_Ah_log1p"] = np.log1p(df.groupby("Battery_ID")["Cap"].cumsum())
     
-    # 修正 SOH: 拿該電池歷史最大的 Cap_EMA 作為 100%
-    df["Max_Cap_Found"] = df.groupby("Battery_ID")["Cap_EMA"].transform('max')
-    df["SOH"] = (df["Cap_EMA"] / df["Max_Cap_Found"]) * 100
-    
-    # [5] 物理極值 (採用 5%-95% 分位數作為雷達圖基準，過濾初始異常值)
+    # [5] 物理極值 (雷達圖分位數校準)
     for feat in ["Cap_EMA", "IR_EMA", "CV_Ratio_EMA", "VD"]:
         df[f"{feat}_min"] = df.groupby("Battery_ID")[feat].transform(lambda x: x.quantile(0.05))
         df[f"{feat}_max"] = df.groupby("Battery_ID")[feat].transform(lambda x: x.quantile(0.95))
@@ -71,7 +74,7 @@ def get_advanced_data(file_path):
     return df.fillna(0.0)
 
 # ==========================================
-# 2. 模型載入模組
+# 2. 模型載入
 # ==========================================
 @st.cache_resource
 def load_research_model():
@@ -79,11 +82,11 @@ def load_research_model():
     if os.path.exists(model_path):
         return joblib.load(model_path)
     else:
-        st.error("❌ 找不到 probms_model.pkl，請先執行 train_model.py！")
+        st.error("❌ 找不到 probms_model.pkl，請先執行訓練腳本！")
         st.stop()
 
 # ==========================================
-# 3. 側邊欄控制
+# 3. 側邊欄控制 (文字全白化設計)
 # ==========================================
 if not os.path.exists("Battery_RUL.csv"):
     st.error("❌ 找不到數據檔案：Battery_RUL.csv")
@@ -99,26 +102,22 @@ with st.sidebar:
     batt_df = df_all[df_all["Battery_ID"] == selected_id].reset_index(drop=True)
     daily_cycles = st.slider("每日循環強度", 0.5, 3.0, 1.2)
     
-    # 初始化 Session State 用於自動播放
     if 'current_idx' not in st.session_state:
         st.session_state.current_idx = len(batt_df) // 2
 
-    # 自動播放按鈕
-    auto_play = st.checkbox("▶️ 啟動實時監控模擬 (Auto-Play)")
+    auto_play = st.checkbox("啟動即時監控模擬 (Auto-Play)")
     
     current_idx = st.slider("時間軸模擬 (Cycle)", 0, len(batt_df)-1, st.session_state.current_idx, key="slider_idx")
     st.session_state.current_idx = current_idx
 
-# 自動播放邏輯
 if auto_play and st.session_state.current_idx < len(batt_df) - 1:
     st.session_state.current_idx += 1
-    time.sleep(0.1)
+    time.sleep(0.05)
     st.rerun()
 
 # ==========================================
-# 4. 實時推論 (Inference)
+# 4. 實時推論
 # ==========================================
-# 根據你的模型封裝結構進行預測
 X_clock = batt_df[model_pkg["clock_feats"]]
 X_c_sc = model_pkg["sc_clock"].transform(X_clock)
 y_base = model_pkg["base_model"].predict(X_c_sc)
@@ -126,10 +125,8 @@ y_base = model_pkg["base_model"].predict(X_c_sc)
 X_phys = batt_df[model_pkg["s1_feats"]]
 X_p_sc = model_pkg["sc_phys"].transform(X_phys)
 
-# 如果你的模型包含多個子模型與 NNLS 權重 (如 Kaggle 研究所示)
 if "nnls_w" in model_pkg:
     p_xgb = model_pkg["xgb_model"].predict(X_p_sc)
-    # 這裡假設你的 pkl 包含這些模型，若無則降級為單一 XGB
     p_et = model_pkg["et_model"].predict(X_p_sc) if "et_model" in model_pkg else p_xgb
     p_hgb = model_pkg["hgb_model"].predict(X_p_sc) if "hgb_model" in model_pkg else p_xgb
     p_lin = model_pkg["lin_model"].predict(X_p_sc) if "lin_model" in model_pkg else p_xgb
@@ -138,21 +135,19 @@ if "nnls_w" in model_pkg:
 else:
     y_res = model_pkg["xgb_model"].predict(X_p_sc)
 
-# 結合預測並套用 PIMS (Isotonic)
 y_final = np.clip(y_base + y_res, 0.0, model_pkg["max_clip"])
 iso = IsotonicRegression(increasing=False, out_of_bounds="clip")
 y_mono = iso.fit_transform(batt_df.index.astype(float), y_final)
 
 # ==========================================
-# 5. 戰情室大螢幕 (SCADA Main)
+# 5. UI 呈現 (文字與點顏色強化)
 # ==========================================
-st.markdown("<div class='pro-title'>電池壽命監控看板</div>", unsafe_allow_html=True)
+st.markdown("<div class='pro-title'>智慧儲能機櫃全局監控戰情室</div>", unsafe_allow_html=True)
 
 row = batt_df.iloc[st.session_state.current_idx]
 pred_rul_now = int(y_mono[st.session_state.current_idx])
 rem_years = pred_rul_now / (daily_cycles * 365)
 
-# KPI 區
 k1, k2, k3, k4 = st.columns(4)
 k1.markdown(f"<div class='kpi-container'><div class='kpi-value'>{pred_rul_now}</div><div class='kpi-label'>AI 預測 RUL (Cycles)</div></div>", unsafe_allow_html=True)
 k2.markdown(f"<div class='kpi-container'><div class='kpi-value'>{rem_years:.1f}</div><div class='kpi-label'>預估可用年資</div></div>", unsafe_allow_html=True)
@@ -161,22 +156,37 @@ k4.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:#00
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 中間圖表
 col_left, col_right = st.columns([2, 1.2])
 
 with col_left:
     st.markdown("<div class='chart-title'>📈 物理單調性退化軌跡 (Req 14: PIMS Proof)</div>", unsafe_allow_html=True)
     fig_traj = go.Figure()
-    # 實際觀測
-    fig_traj.add_trace(go.Scatter(x=batt_df.index[:st.session_state.current_idx+1], y=batt_df['RUL'].iloc[:st.session_state.current_idx+1], 
-                                 name="實際 RUL", line=dict(color='#ffffff', width=1, dash='dot')))
-    # AI 預測路徑
-    fig_traj.add_trace(go.Scatter(x=batt_df.index, y=y_mono, name="AI 物理感知路徑", line=dict(color='#00ffca', width=4)))
     
-    # 當前時間指示線
+    # 實際 RUL: 改為黑色珍珠點 (Black markers with white border)
+    fig_traj.add_trace(go.Scatter(
+        x=batt_df.index[:st.session_state.current_idx+1], 
+        y=batt_df['RUL'].iloc[:st.session_state.current_idx+1], 
+        name="實際 RUL (Observed)", 
+        mode='markers',
+        marker=dict(color='#000000', size=6, line=dict(color='#ffffff', width=1))
+    ))
+    
+    # AI 路徑: 青色寬實線
+    fig_traj.add_trace(go.Scatter(
+        x=batt_df.index, y=y_mono, 
+        name="AI 物理感知路徑 (Predicted)", 
+        line=dict(color='#00ffca', width=4)
+    ))
+    
     fig_traj.add_vline(x=st.session_state.current_idx, line_dash="dash", line_color="#ff4040")
     
-    fig_traj.update_layout(template="plotly_dark", height=380, margin=dict(l=10,r=10,t=10,b=10), paper_bgcolor='rgba(0,0,0,0)')
+    fig_traj.update_layout(
+        template="plotly_dark", height=380, margin=dict(l=10,r=10,t=10,b=10),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        legend=dict(font=dict(color="#ffffff")), # 文字改白色
+        xaxis=dict(tickfont=dict(color="#ffffff"), title_font=dict(color="#ffffff")),
+        yaxis=dict(tickfont=dict(color="#ffffff"), title_font=dict(color="#ffffff"))
+    )
     st.plotly_chart(fig_traj, use_container_width=True)
 
 with col_right:
@@ -200,18 +210,16 @@ with col_right:
     fig_radar.add_trace(go.Scatterpolar(r=scores + [scores[0]], theta=labels + [labels[0]], 
                                        fill='toself', fillcolor='rgba(0, 255, 202, 0.15)', line=dict(color='#00ffca', width=2)))
     fig_radar.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 100], gridcolor='#222', tickfont=dict(size=8)),
-                   angularaxis=dict(gridcolor='#222', tickfont=dict(size=10))),
+        polar=dict(radialaxis=dict(visible=True, range=[0, 100], gridcolor='#333', tickfont=dict(color="#ffffff", size=8)),
+                   angularaxis=dict(gridcolor='#333', tickfont=dict(color="#ffffff", size=10))),
         template="plotly_dark", showlegend=False, height=380, margin=dict(l=40,r=40,t=40,b=40), paper_bgcolor='rgba(0,0,0,0)'
     )
     st.plotly_chart(fig_radar, use_container_width=True)
 
-# 底部日誌
-st.markdown("<div class='chart-title'>📋 專家系統診斷日誌 (Kaggle Research Engine)</div>", unsafe_allow_html=True)
+st.markdown("<div class='chart-title'>📋 專家系統診斷日誌</div>", unsafe_allow_html=True)
 st.markdown(f"""
 <div class='terminal-log'>
-[LOG] 2026-03-01 | 機櫃 #{selected_id:03d} | 模型架構：Ridge + XGBoost Residual Learning<br>
-[DATA] 物理退化因子 (Tau): {row['Tau']:.4f} | 累積能量感測: {np.exp(row['Cum_Ah_log1p']):.1f} Ah<br>
+[LOG] 2026-03-01 | 機櫃 #{selected_id:03d} | Tau: {row['Tau']:.4f}<br>
 [ADVICE] 已修正初期活化跳動。目前的 SOH 健康評分為 {row['SOH']:.1f}%，預測曲線符合物理單調性規律。
 </div>
 """, unsafe_allow_html=True)
