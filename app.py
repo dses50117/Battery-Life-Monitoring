@@ -4,6 +4,11 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 import os
+import xgboost as xgb
+import shap
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import Ridge
+from sklearn.isotonic import IsotonicRegression
 
 # ==========================================
 # 0. 頁面基本設置與樣式 (Setup)
@@ -94,14 +99,82 @@ def get_processed_data(file_path):
     df = pd.read_csv(file_path)
     c = pd.to_numeric(df["Cycle_Index"], errors="coerce").fillna(0).values
     df["Battery_ID"] = np.cumsum((c[1:] <= c[:-1]).astype(int).tolist() + [0])
-    df["SOH_Proxy"] = df.groupby("Battery_ID")["Discharge Time (s)"].transform(lambda x: x.ewm(alpha=0.1).mean())
-    df["Max_SOH"] = df.groupby("Battery_ID")["SOH_Proxy"].transform("max")
-    df["SOH_Percentage"] = (df["SOH_Proxy"] / df["Max_SOH"]) * 100
-    df["IR_Proxy"] = (4.2 - df["Max. Voltage Dischar. (V)"]).ewm(alpha=0.1).mean()
-    df["CV_Ratio"] = (df["Time at 4.15V (s)"] / (df["Charging time (s)"] + 1e-6)).fillna(0)
-    df["CV_Ratio_EMA"] = df.groupby("Battery_ID")["CV_Ratio"].transform(lambda x: x.ewm(alpha=0.1).mean())
+    
+    # 基礎特徵
+    df["Cap"] = df.get("Discharge Time (s)", 0.0).astype(float)
+    df["IR"]  = (4.2 - df.get("Max. Voltage Dischar. (V)", 4.2)).astype(float)
+    df["CV_Ratio"] = (df.get("Time at 4.15V (s)", 0.0) / (df.get("Charging time (s)", 1.0) + 1e-6)).astype(float)
+    df["CC_Time"] = df.get("Time constant current (s)", 0.0).astype(float)
+    
+    # 時鐘特徵
+    df["Cycle_Index"] = df.groupby("Battery_ID").cumcount()
+    df["Cum_Ah"] = df.groupby("Battery_ID")["Cap"].cumsum()
+    df["Cum_Ah_log1p"] = np.log1p(df["Cum_Ah"])
+    
+    # 物理特徵工程 (EMA, Diff)
+    for col in ["Cap", "IR", "CV_Ratio", "CC_Time"]:
+        init = df.groupby("Battery_ID")[col].transform("first")
+        df[f"{col}_Ret"] = df[col] / (init + 1e-6)
+        df[f"{col}_EMA"] = df.groupby("Battery_ID")[f"{col}_Ret"].transform(lambda x: x.ewm(alpha=0.1, adjust=False).mean())
+        df[f"{col}_v1"] = df.groupby("Battery_ID")[f"{col}_EMA"].diff(10).fillna(0.0)
+    
+    for col in ["Cap_EMA", "IR_EMA", "CV_Ratio_EMA"]:
+        g = df.groupby("Battery_ID")[col]
+        for w in [10, 20]:
+            df[f"{col}_rm{w}"] = g.transform(lambda x: x.rolling(w, min_periods=1).mean())
+            df[f"{col}_rs{w}"] = g.transform(lambda x: x.rolling(w, min_periods=1).std()).fillna(0.0)
+            df[f"{col}_slope{w}"] = g.transform(lambda x: ((x - x.shift(w)).fillna(0.0)) / (w + 1e-6))
+    
+    df["Max_SOH"] = df.groupby("Battery_ID")["Cap_EMA"].transform("max")
+    df["SOH_Percentage"] = (df["Cap_EMA"] / df["Max_SOH"]) * 100
     df["Temp_Proxy"] = df["Max. Voltage Dischar. (V)"] * 0.5 + 20 # 模擬假溫度特徵供雷達圖
-    return df
+    df["IR_Proxy"] = df["IR"]
+
+    return df.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+# ==========================================
+# 1.5. 輕量化訓練管線 (Lightweight Model Pipeline)
+# ==========================================
+@st.cache_resource
+def train_light_model(df_all):
+    base_feats = [c for c in ["Cap_EMA","IR_EMA","CV_Ratio_EMA","CC_Time_EMA"] if c in df_all.columns]
+    base_feats += [c for c in ["Cap_v1","IR_v1","CV_Ratio_v1"] if c in df_all.columns]
+    for col in ["Cap_EMA", "IR_EMA", "CV_Ratio_EMA"]:
+        for w in [10, 20]:
+            for suf in ["_rm", "_rs", "_slope"]:
+                if f"{col}{suf}{w}" in df_all.columns: base_feats.append(f"{col}{suf}{w}")
+    clock_plus = ["Cum_Ah_log1p", "Cycle_Index"]
+    feats = sorted(list(set(base_feats + clock_plus)))
+    
+    y = df_all["RUL"].values.astype(float)
+    X = df_all[feats].values
+
+    # Base Ridge
+    sc_clock = StandardScaler()
+    X_c = sc_clock.fit_transform(df_all[clock_plus].values)
+    base = Ridge(alpha=12.44)
+    base.fit(X_c, y)
+    yb = np.clip(base.predict(X_c), 0.0, y.max() * 1.1)
+    r_base = y - yb
+
+    # XGBoost Residual
+    sc = StandardScaler()
+    X_sc = sc.fit_transform(X)
+    clf_xgb = xgb.XGBRegressor(
+        n_estimators=1000, learning_rate=0.01, max_depth=3,
+        subsample=0.7, colsample_bytree=0.7, reg_lambda=37.2,
+        objective="reg:pseudohubererror", tree_method="hist", n_jobs=-1, random_state=42
+    )
+    clf_xgb.fit(X_sc, r_base, verbose=False)
+    
+    # SHAP Explainer
+    explainer = shap.TreeExplainer(clf_xgb)
+    
+    return {
+        "features": feats, "clock_features": clock_plus,
+        "sc_clock": sc_clock, "base": base,
+        "sc": sc, "clf_xgb": clf_xgb, "explainer": explainer, "max_clip": y.max() * 1.1
+    }
 
 # ==========================================
 # 2. 側邊控制面板 (Control Sidebar)
@@ -136,6 +209,9 @@ with st.sidebar:
     )
 
 row = batt_df.iloc[current_idx]
+
+# 取得訓練好的模型
+model_data = train_light_model(full_df)
 
 # ==========================================
 # 3. 頂部看板層 (Strategic Layer)
@@ -190,7 +266,7 @@ with col_main:
     st.markdown("<div class='chart-title'>▯ 壽命衰減軌跡預測 (Life Degradation Trajectory)</div>", unsafe_allow_html=True)
     fig_line = go.Figure()
     
-    # 歷史軌跡
+    # 歷史軌跡 (實際值)
     hist_x = batt_df.index[:current_idx+1]
     hist_y = batt_df['RUL'].iloc[:current_idx+1]
     fig_line.add_trace(go.Scatter(
@@ -199,14 +275,28 @@ with col_main:
         line=dict(color='#00ffca', width=3)
     ))
     
-    # AI 預測軌跡
-    pred_x = batt_df.index[current_idx:]
-    pred_y = batt_df['RUL'].iloc[current_idx:]
-    fig_line.add_trace(go.Scatter(
-        x=pred_x, y=pred_y,
-        name="AI Forecast", mode='lines',
-        line=dict(color='#666666', dash='dash', width=2)
-    ))
+    # AI 預測軌跡 (動態推論未來到生命週期結束)
+    if current_idx < len(batt_df) - 1:
+        future_df = batt_df.iloc[current_idx:].copy()
+        
+        # 進行預測
+        X_c_fut = model_data["sc_clock"].transform(future_df[model_data["clock_features"]].values)
+        yb_fut = np.clip(model_data["base"].predict(X_c_fut), 0.0, model_data["max_clip"])
+        
+        X_fut = model_data["sc"].transform(future_df[model_data["features"]].values)
+        res_fut = model_data["clf_xgb"].predict(X_fut)
+        raw_pred = np.clip(yb_fut + res_fut, 0.0, model_data["max_clip"])
+        
+        # 保證物理衰減單調性 (Isotonic Regression)
+        iso = IsotonicRegression(increasing=False, out_of_bounds="clip")
+        mono_pred = iso.fit_transform(future_df["Cycle_Index"].values.astype(float), raw_pred)
+        
+        pred_x = future_df.index
+        fig_line.add_trace(go.Scatter(
+            x=pred_x, y=mono_pred,
+            name="AI Forecast", mode='lines',
+            line=dict(color='#666666', dash='dash', width=2)
+        ))
     
     fig_line.update_layout(
         template="plotly_dark", 
@@ -256,14 +346,32 @@ with col_side:
 col_diag1, col_diag2 = st.columns([1.5, 1.5])
 
 # 產生 Terminal 報告與 SHAP 數據
-ir_val = float(row.get('IR_Proxy', 0))
-pol_val = float(row.get('CV_Ratio_EMA', 0))
+ir_val = float(np.nan_to_num(row.get('IR_Proxy', 0)))
+pol_val = float(np.nan_to_num(row.get('CV_Ratio_EMA', 0)))
 
 log_lines = []
+
+# 動態計算當前時間點的 XGBoost SHAP Values
+current_features = row[model_data["features"]].values.reshape(1, -1)
+current_features_sc = model_data["sc"].transform(current_features)
+shap_vals = model_data["explainer"].shap_values(current_features_sc)[0]
+
+# 將零碎特徵聚合成大類顯示
 shap_dict = {
-    "Capacity Fade": 0.35, "Internal Resistance": 0.28, "Polarization": 0.15,
-    "Voltage Drop": 0.10, "Cycle Stress": 0.12
+    "Capacity Fade": 0.0, "Internal Resistance": 0.0, "Polarization": 0.0,
+    "Voltage Drop": 0.0, "Cycle Stress": 0.0
 }
+for i, feat in enumerate(model_data["features"]):
+    val = abs(shap_vals[i])
+    if "Cap" in feat: shap_dict["Capacity Fade"] += val
+    elif "IR" in feat: shap_dict["Internal Resistance"] += val
+    elif "CV" in feat: shap_dict["Polarization"] += val
+    elif "Cycle" in feat or "Ah" in feat: shap_dict["Cycle Stress"] += val
+    else: shap_dict["Voltage Drop"] += val
+
+# 如果因剛開始訓練或數值極小而全為0，給予微小基礎值以便顯示圖表
+if sum(shap_dict.values()) == 0:
+    shap_dict = {"Capacity Fade": 0.35, "Internal Resistance": 0.28, "Polarization": 0.15, "Voltage Drop": 0.10, "Cycle Stress": 0.12}
 
 if sys_status == "CRITICAL" or soh_val < 70:
     log_lines.append(f"<span style='color:#aaaaaa'>[{current_idx:04d}]</span> 🚨 CRITICAL: 電池 #{selected_id:03d} 容量已低於臨界點 (SOH {soh_val:.1f}%).")
