@@ -6,6 +6,7 @@ import plotly.express as px
 import os
 import xgboost as xgb
 import shap
+import joblib
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import Ridge
 from sklearn.isotonic import IsotonicRegression
@@ -133,48 +134,14 @@ def get_processed_data(file_path):
     return df.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 # ==========================================
-# 1.5. 輕量化訓練管線 (Lightweight Model Pipeline)
+# 1.5. 輕量化模型推論管線 (Lightweight Model Inference)
 # ==========================================
-@st.cache_resource(show_spinner="🧠 AI 模型訓練中：正在利用原始資料集擬合 Ridge + XGBoost 全局壽命模型...")
-def train_light_model(_df_all):
-    base_feats = [c for c in ["Cap_EMA","IR_EMA","CV_Ratio_EMA","CC_Time_EMA"] if c in _df_all.columns]
-    base_feats += [c for c in ["Cap_v1","IR_v1","CV_Ratio_v1"] if c in _df_all.columns]
-    for col in ["Cap_EMA", "IR_EMA", "CV_Ratio_EMA"]:
-        for w in [10, 20]:
-            for suf in ["_rm", "_rs", "_slope"]:
-                if f"{col}{suf}{w}" in _df_all.columns: base_feats.append(f"{col}{suf}{w}")
-    clock_plus = ["Cum_Ah_log1p", "Cycle_Index"]
-    feats = sorted(list(set(base_feats + clock_plus)))
-    
-    y = _df_all["RUL"].values.astype(float)
-    X = _df_all[feats].values
-
-    # Base Ridge
-    sc_clock = StandardScaler()
-    X_c = sc_clock.fit_transform(_df_all[clock_plus].values)
-    base = Ridge(alpha=12.44)
-    base.fit(X_c, y)
-    yb = np.clip(base.predict(X_c), 0.0, y.max() * 1.1)
-    r_base = y - yb
-
-    # XGBoost Residual
-    sc = StandardScaler()
-    X_sc = sc.fit_transform(X)
-    clf_xgb = xgb.XGBRegressor(
-        n_estimators=1000, learning_rate=0.01, max_depth=3,
-        subsample=0.7, colsample_bytree=0.7, reg_lambda=37.2,
-        objective="reg:pseudohubererror", tree_method="hist", n_jobs=-1, random_state=42
-    )
-    clf_xgb.fit(X_sc, r_base, verbose=False)
-    
-    # SHAP Explainer
-    explainer = shap.TreeExplainer(clf_xgb)
-    
-    return {
-        "features": feats, "clock_features": clock_plus,
-        "sc_clock": sc_clock, "base": base,
-        "sc": sc, "clf_xgb": clf_xgb, "explainer": explainer, "max_clip": y.max() * 1.1
-    }
+@st.cache_resource(show_spinner="⚡ AI 模型讀取中：正在載入預先訓練好的 PRO-BMS 核心模型...")
+def load_light_model(model_path="probms_model.pkl"):
+    if not os.path.exists(model_path):
+        st.error(f"❌ 找不到模型檔案：{model_path}。請先執行 `python train_model.py` 訓練並產生模型！")
+        st.stop()
+    return joblib.load(model_path)
 
 # ==========================================
 # 2. 側邊控制面板 (Control Sidebar)
@@ -210,8 +177,8 @@ with st.sidebar:
 
 row = batt_df.iloc[current_idx]
 
-# 取得訓練好的模型
-model_data = train_light_model(full_df)
+# 取得已經訓練好的模型
+model_data = load_light_model("probms_model.pkl")
 
 # ==========================================
 # 3. 頂部看板層 (Strategic Layer)
