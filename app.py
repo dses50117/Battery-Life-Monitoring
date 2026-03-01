@@ -8,7 +8,7 @@ import os
 # ==========================================
 # 0. 頁面基本設置與樣式 (Setup)
 # ==========================================
-st.set_page_config(page_title="PRO-BMS | Global Battery Health Monitoring System", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="PRO-BMS | Global Battery Health Monitoring System", layout="wide", initial_sidebar_state="expanded")
 
 # 引入自定義 CSS (PRO-BMS 純粹暗黑與霓虹綠風格)
 st.markdown("""
@@ -221,13 +221,13 @@ with col_main:
 with col_side:
     st.markdown("<div class='chart-title'>▯ 物理健康雷達圖 (Physical Health Radar)</div>", unsafe_allow_html=True)
     
-    radar_soh = float(row.get('SOH_Percentage', 100))
-    ir_val_safe = float(row.get('IR_Proxy', 0))
+    radar_soh = float(np.nan_to_num(row.get('SOH_Percentage', 100), nan=100.0))
+    ir_val_safe = float(np.nan_to_num(row.get('IR_Proxy', 0), nan=0.0))
     radar_res = max(0.0, 100.0 - (ir_val_safe / 0.8) * 100.0)
-    pol_val_safe = float(row.get('CV_Ratio_EMA', 0))
+    pol_val_safe = float(np.nan_to_num(row.get('CV_Ratio_EMA', 0), nan=0.0))
     radar_pol = max(0.0, 100.0 - pol_val_safe * 100.0)
     radar_vd = radar_res * 0.95 # Mock Voltage Drop based on Resistance
-    radar_th = float(row.get('Temp_Proxy', 20)) / 40 * 100 # Mock Thermal
+    radar_th = float(np.nan_to_num(row.get('Temp_Proxy', 20), nan=20.0)) / 40 * 100 # Mock Thermal
     
     radar_data = pd.DataFrame(dict(
         r=[radar_soh, radar_res, radar_vd, radar_pol, radar_th],
