@@ -94,7 +94,7 @@ st.markdown("""
 # ==========================================
 # 1. 數據準備與特徵工程 (Data Prep)
 # ==========================================
-@st.cache_data
+@st.cache_data(show_spinner="⏳ 資料初始化：正在從 Battery_RUL.csv 提取 14 顆電池特徵...")
 def get_processed_data(file_path):
     df = pd.read_csv(file_path)
     c = pd.to_numeric(df["Cycle_Index"], errors="coerce").fillna(0).values
@@ -135,7 +135,7 @@ def get_processed_data(file_path):
 # ==========================================
 # 1.5. 輕量化訓練管線 (Lightweight Model Pipeline)
 # ==========================================
-@st.cache_resource
+@st.cache_resource(show_spinner="🧠 AI 模型訓練中：正在利用原始資料集擬合 Ridge + XGBoost 全局壽命模型...")
 def train_light_model(df_all):
     base_feats = [c for c in ["Cap_EMA","IR_EMA","CV_Ratio_EMA","CC_Time_EMA"] if c in df_all.columns]
     base_feats += [c for c in ["Cap_v1","IR_v1","CV_Ratio_v1"] if c in df_all.columns]
