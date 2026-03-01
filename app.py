@@ -11,47 +11,54 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.isotonic import IsotonicRegression
 
 # ==========================================
-# 0. 頁面配置與高對比視覺優化
+# 0. 頁面配置與高對比視覺優化 (徹底移除白條)
 # ==========================================
 st.set_page_config(page_title="電池壽命監控看板", layout="wide")
 
 st.markdown("""
 <style>
-    /* 全局背景 */
+    /* 1. 隱藏預設 Header (解決最上方白色的關鍵) */
+    header { visibility: hidden; height: 0px; }
+    footer { visibility: hidden; }
+    #MainMenu { visibility: hidden; }
+
+    /* 2. 全局背景與文字顏色 */
     .stApp { background-color: #000000; color: #ffffff; }
     
-    /* 側邊欄文字白化 */
-    [data-testid="stSidebar"] section label { color: #ffffff !important; font-weight: bold; }
-    [data-testid="stSidebar"] .stMarkdown p { color: #ffffff !important; }
+    /* 3. 側邊欄視覺優化 (黑底白字) */
     [data-testid="stSidebar"] { background-color: #0a0a0a !important; border-right: 1px solid #1a1a1a; }
+    [data-testid="stSidebar"] section label { color: #ffffff !important; font-weight: bold; font-size: 1rem; }
+    [data-testid="stSidebar"] .stMarkdown p { color: #ffffff !important; }
     
-    /* 頂部標題列：黑底白字高對比 */
+    /* 4. 自定義頂部標題列 (黑底白字高對比) */
     .pro-header {
         background-color: #000000;
         border-bottom: 2px solid #333;
-        padding: 15px;
-        margin-top: -60px;
+        padding: 20px;
+        margin-top: -80px; /* 向上移動填補隱藏 header 的空隙 */
         margin-bottom: 25px;
         text-align: center;
     }
     .pro-title { color: #ffffff; font-size: 1.8rem; font-weight: bold; letter-spacing: 2px; }
 
-    /* KPI 樣式 */
+    /* 5. KPI 樣式 */
     .kpi-container { text-align: center; padding: 15px; background: rgba(255, 255, 255, 0.05); border: 1px solid #333; border-radius: 8px; }
     .kpi-value { font-size: 3rem; color: #00ffca; font-weight: 400; }
     .kpi-label { font-size: 0.8rem; color: #ffffff; text-transform: uppercase; }
     
-    .chart-title { color: #ffffff; font-size: 1rem; border-left: 4px solid #00ffca; padding-left: 10px; margin-top: 10px; }
+    /* 6. 圖表與日誌樣式 */
+    .chart-title { color: #ffffff; font-size: 1rem; border-left: 4px solid #00ffca; padding-left: 10px; margin-top: 10px; margin-bottom: 10px; }
     .terminal-log { font-family: 'Courier New', monospace; color: #00ffca; font-size: 0.85rem; padding: 10px; background: #050505; border: 1px solid #333; border-radius: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 數據引擎：SOH 基準修正與物理過濾
+# 1. 數據引擎：研究等級特徵工程 (含離群值清洗)
 # ==========================================
-@st.cache_data(show_spinner="⏳ 同步機櫃數據中...")
+@st.cache_data(show_spinner="⏳ 正在同步數據...")
 def get_advanced_data(file_path):
     df = pd.read_csv(file_path)
+    # 物理清洗：過濾感測器異常值
     df["Discharge Time (s)"] = df["Discharge Time (s)"].clip(upper=10000)
     
     c = pd.to_numeric(df["Cycle_Index"], errors="coerce").fillna(0).values
@@ -69,7 +76,7 @@ def get_advanced_data(file_path):
         df[f"{col}_EMA"] = df.groupby("Battery_ID")[f"{col}_Ret"].transform(lambda x: x.ewm(alpha=0.1, adjust=False).mean())
         df[f"{col}_rm20"] = df.groupby("Battery_ID")[f"{col}_EMA"].transform(lambda x: x.rolling(20, min_periods=1).mean())
     
-    # 修正 SOH 異常：改用 95% 分位數作為健康基準
+    # 修正 SOH 基準點
     df["Max_Cap_Found"] = df.groupby("Battery_ID")["Cap_EMA"].transform(lambda x: x.quantile(0.95))
     df["SOH"] = (df["Cap_EMA"] / df["Max_Cap_Found"]) * 100
     df["SOH"] = df["SOH"].clip(0.0, 100.0)
@@ -88,8 +95,9 @@ def load_research_model():
     return joblib.load("probms_model.pkl")
 
 # ==========================================
-# 2. 側邊欄與標題 (視覺白化優化)
+# 2. 佈局呈現
 # ==========================================
+# 頂部戰情室標題 (黑底白字)
 st.markdown("<div class='pro-header'><div class='pro-title'>智慧儲能機櫃全局監控戰情室 (SCADA System)</div></div>", unsafe_allow_html=True)
 
 df_all = get_advanced_data("Battery_RUL.csv")
@@ -119,7 +127,7 @@ X_c_sc = model_pkg["sc_clock"].transform(batt_df[model_pkg["clock_feats"]])
 y_base = model_pkg["base_model"].predict(X_c_sc)
 X_p_sc = model_pkg["sc_phys"].transform(batt_df[model_pkg["s1_feats"]])
 
-# NNLS Ensemble
+# NNLS Ensemble 推論
 P = np.column_stack([
     model_pkg["xgb_model"].predict(X_p_sc), model_pkg["et_model"].predict(X_p_sc),
     model_pkg["hgb_model"].predict(X_p_sc), model_pkg["lin_model"].predict(X_p_sc), np.ones(len(batt_df))
@@ -129,7 +137,7 @@ y_final = np.clip(y_base + y_res, 0.0, model_pkg["max_clip"])
 y_mono = IsotonicRegression(increasing=False, out_of_bounds="clip").fit_transform(batt_df.index.astype(float), y_final)
 
 # ==========================================
-# 4. 戰術分析層
+# 4. 圖表與數據顯示 (文字與點顏色強化)
 # ==========================================
 row = batt_df.iloc[st.session_state.current_idx]
 pred_rul_now = int(y_mono[st.session_state.current_idx])
@@ -147,9 +155,9 @@ st.markdown("<br>", unsafe_allow_html=True)
 col_left, col_right = st.columns([2, 1.2])
 
 with col_left:
-    st.markdown("<div class='chart-title'>📈 物理單調性退化軌跡 (PIMS Monotonicity)</div>", unsafe_allow_html=True)
+    st.markdown("<div class='chart-title'>📈 物理單調性退化軌跡 (Req 14: PIMS Proof)</div>", unsafe_allow_html=True)
     fig_traj = go.Figure()
-    # 實際觀測：珍珠點顏色
+    # 實際觀測：珍珠點 (黑色實心+白色外圈)
     fig_traj.add_trace(go.Scatter(
         x=batt_df.index[:st.session_state.current_idx+1], 
         y=batt_df['RUL'].iloc[:st.session_state.current_idx+1], 
@@ -192,5 +200,5 @@ with col_right:
     )
     st.plotly_chart(fig_radar, use_container_width=True)
 
-st.markdown("<div class='chart-title'>📋 專家系統診斷日誌 (Research Engine)</div>", unsafe_allow_html=True)
-st.markdown(f"<div class='terminal-log'>[LOG] 2026-03-01 |機櫃 #{selected_id:03d} | SOH: {row['SOH']:.1f}%<br>[ADVICE] 已排除感測器異常離群值。AI 物理殘差引擎運算中，軌跡符合熱力學單調降解趨勢。</div>", unsafe_allow_html=True)
+st.markdown("<div class='chart-title'>📋 專家系統診斷日誌</div>", unsafe_allow_html=True)
+st.markdown(f"<div class='terminal-log'>[LOG] 2026-03-01 | 機櫃 #{selected_id:03d} | Tau: {row['Tau']:.4f}<br>[ADVICE] 已移除異常離群值，看板頂部白條已清除。系統運行於物理單調約束模式。</div>", unsafe_allow_html=True)
