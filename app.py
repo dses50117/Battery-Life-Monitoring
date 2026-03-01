@@ -6,6 +6,7 @@ import plotly.express as px
 import os
 import xgboost as xgb
 import joblib
+import time
 from sklearn.preprocessing import StandardScaler
 from sklearn.isotonic import IsotonicRegression
 
@@ -28,7 +29,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 數據引擎：研究等級特徵工程 (同步 Kaggle 邏輯)
+# 1. 數據引擎：研究等級特徵工程 (修正 700% 問題)
 # ==========================================
 @st.cache_data(show_spinner="⏳ 正在同步 14 顆機櫃數據與物理特徵工程...")
 def get_advanced_data(file_path):
@@ -40,7 +41,7 @@ def get_advanced_data(file_path):
     df = df.sort_values(["Battery_ID", "Cycle_Index"]).reset_index(drop=True)
     df["Cycle_Index_Clean"] = df.groupby("Battery_ID").cumcount()
     
-    # [2] 物理特徵映射與計算
+    # [2] 基礎物理量映射
     df["Cap"] = df["Discharge Time (s)"].astype(float)
     df["IR"]  = (4.2 - df["Max. Voltage Dischar. (V)"]).astype(float)
     df["CV_Ratio"] = (df["Time at 4.15V (s)"] / (df["Charging time (s)"] + 1e-6)).astype(float)
@@ -53,20 +54,24 @@ def get_advanced_data(file_path):
         df[f"{col}_EMA"] = df.groupby("Battery_ID")[f"{col}_Ret"].transform(lambda x: x.ewm(alpha=0.1, adjust=False).mean())
         df[f"{col}_rm20"] = df.groupby("Battery_ID")[f"{col}_EMA"].transform(lambda x: x.rolling(20, min_periods=1).mean())
     
-    # [4] 物理指標 (SOH & Tau)
-    df["SOH"] = df.groupby("Battery_ID")["Cap_EMA"].transform(lambda x: (x / x.iloc[0]) * 100)
+    # [4] 研究核心指標 (修正 SOH 700%：改用歷史最大值基準)
+    # 物理退化因子 (Tau)
     df["Tau"] = (1.0 / (1.0 + np.exp(-df["Cap_EMA"]))).clip(0.0, 1.0)
     df["Cum_Ah_log1p"] = np.log1p(df.groupby("Battery_ID")["Cap"].cumsum())
     
-    # [5] 物理極值 (用於雷達圖)
+    # 修正 SOH: 拿該電池歷史最大的 Cap_EMA 作為 100%
+    df["Max_Cap_Found"] = df.groupby("Battery_ID")["Cap_EMA"].transform('max')
+    df["SOH"] = (df["Cap_EMA"] / df["Max_Cap_Found"]) * 100
+    
+    # [5] 物理極值 (採用 5%-95% 分位數作為雷達圖基準，過濾初始異常值)
     for feat in ["Cap_EMA", "IR_EMA", "CV_Ratio_EMA", "VD"]:
-        df[f"{feat}_min"] = df.groupby("Battery_ID")[feat].transform("min")
-        df[f"{feat}_max"] = df.groupby("Battery_ID")[feat].transform("max")
+        df[f"{feat}_min"] = df.groupby("Battery_ID")[feat].transform(lambda x: x.quantile(0.05))
+        df[f"{feat}_max"] = df.groupby("Battery_ID")[feat].transform(lambda x: x.quantile(0.95))
         
     return df.fillna(0.0)
 
 # ==========================================
-# 2. 模型載入與推論 (雙層架構：Ridge + XGBoost)
+# 2. 模型載入模組
 # ==========================================
 @st.cache_resource
 def load_research_model():
@@ -74,7 +79,7 @@ def load_research_model():
     if os.path.exists(model_path):
         return joblib.load(model_path)
     else:
-        st.error("❌ 找不到 probms_model.pkl，請先執行新版 train_model.py！")
+        st.error("❌ 找不到 probms_model.pkl，請先執行 train_model.py！")
         st.stop()
 
 # ==========================================
@@ -93,33 +98,48 @@ with st.sidebar:
     
     batt_df = df_all[df_all["Battery_ID"] == selected_id].reset_index(drop=True)
     daily_cycles = st.slider("每日循環強度", 0.5, 3.0, 1.2)
-    current_idx = st.slider("時間軸模擬 (Cycle)", 0, len(batt_df)-1, len(batt_df)//2)
+    
+    # 初始化 Session State 用於自動播放
+    if 'current_idx' not in st.session_state:
+        st.session_state.current_idx = len(batt_df) // 2
+
+    # 自動播放按鈕
+    auto_play = st.checkbox("▶️ 啟動實時監控模擬 (Auto-Play)")
+    
+    current_idx = st.slider("時間軸模擬 (Cycle)", 0, len(batt_df)-1, st.session_state.current_idx, key="slider_idx")
+    st.session_state.current_idx = current_idx
+
+# 自動播放邏輯
+if auto_play and st.session_state.current_idx < len(batt_df) - 1:
+    st.session_state.current_idx += 1
+    time.sleep(0.1)
+    st.rerun()
 
 # ==========================================
 # 4. 實時推論 (Inference)
 # ==========================================
-# 準備時鐘特徵
+# 根據你的模型封裝結構進行預測
 X_clock = batt_df[model_pkg["clock_feats"]]
 X_c_sc = model_pkg["sc_clock"].transform(X_clock)
 y_base = model_pkg["base_model"].predict(X_c_sc)
 
-# 準備物理特徵
 X_phys = batt_df[model_pkg["s1_feats"]]
 X_p_sc = model_pkg["sc_phys"].transform(X_phys)
 
-# 全局集成推論 (NNLS)
-p_xgb = model_pkg["xgb_model"].predict(X_p_sc)
-p_et = model_pkg["et_model"].predict(X_p_sc)
-p_hgb = model_pkg["hgb_model"].predict(X_p_sc)
-p_lin = model_pkg["lin_model"].predict(X_p_sc)
-P_matrix = np.column_stack([p_xgb, p_et, p_hgb, p_lin, np.ones(len(batt_df))])
+# 如果你的模型包含多個子模型與 NNLS 權重 (如 Kaggle 研究所示)
+if "nnls_w" in model_pkg:
+    p_xgb = model_pkg["xgb_model"].predict(X_p_sc)
+    # 這裡假設你的 pkl 包含這些模型，若無則降級為單一 XGB
+    p_et = model_pkg["et_model"].predict(X_p_sc) if "et_model" in model_pkg else p_xgb
+    p_hgb = model_pkg["hgb_model"].predict(X_p_sc) if "hgb_model" in model_pkg else p_xgb
+    p_lin = model_pkg["lin_model"].predict(X_p_sc) if "lin_model" in model_pkg else p_xgb
+    P_matrix = np.column_stack([p_xgb, p_et, p_hgb, p_lin, np.ones(len(batt_df))])
+    y_res = P_matrix @ model_pkg["nnls_w"]
+else:
+    y_res = model_pkg["xgb_model"].predict(X_p_sc)
 
-y_res = P_matrix @ model_pkg["nnls_w"]
-
-# 結合預測
+# 結合預測並套用 PIMS (Isotonic)
 y_final = np.clip(y_base + y_res, 0.0, model_pkg["max_clip"])
-
-# 單調性校正 (PIMS)
 iso = IsotonicRegression(increasing=False, out_of_bounds="clip")
 y_mono = iso.fit_transform(batt_df.index.astype(float), y_final)
 
@@ -128,10 +148,11 @@ y_mono = iso.fit_transform(batt_df.index.astype(float), y_final)
 # ==========================================
 st.markdown("<div class='pro-title'>▯ PRO-BMS | 智慧儲能機櫃全局監控戰情室</div>", unsafe_allow_html=True)
 
-row = batt_df.iloc[current_idx]
-pred_rul_now = int(y_mono[current_idx])
+row = batt_df.iloc[st.session_state.current_idx]
+pred_rul_now = int(y_mono[st.session_state.current_idx])
 rem_years = pred_rul_now / (daily_cycles * 365)
 
+# KPI 區
 k1, k2, k3, k4 = st.columns(4)
 k1.markdown(f"<div class='kpi-container'><div class='kpi-value'>{pred_rul_now}</div><div class='kpi-label'>AI 預測 RUL (Cycles)</div></div>", unsafe_allow_html=True)
 k2.markdown(f"<div class='kpi-container'><div class='kpi-value'>{rem_years:.1f}</div><div class='kpi-label'>預估可用年資</div></div>", unsafe_allow_html=True)
@@ -147,13 +168,13 @@ with col_left:
     st.markdown("<div class='chart-title'>📈 物理單調性退化軌跡 (Req 14: PIMS Proof)</div>", unsafe_allow_html=True)
     fig_traj = go.Figure()
     # 實際觀測
-    fig_traj.add_trace(go.Scatter(x=batt_df.index[:current_idx+1], y=batt_df['RUL'].iloc[:current_idx+1], 
+    fig_traj.add_trace(go.Scatter(x=batt_df.index[:st.session_state.current_idx+1], y=batt_df['RUL'].iloc[:st.session_state.current_idx+1], 
                                  name="實際 RUL", line=dict(color='#ffffff', width=1, dash='dot')))
     # AI 預測路徑
     fig_traj.add_trace(go.Scatter(x=batt_df.index, y=y_mono, name="AI 物理感知路徑", line=dict(color='#00ffca', width=4)))
     
     # 當前時間指示線
-    fig_traj.add_vline(x=current_idx, line_dash="dash", line_color="#ff4040")
+    fig_traj.add_vline(x=st.session_state.current_idx, line_dash="dash", line_color="#ff4040")
     
     fig_traj.update_layout(template="plotly_dark", height=380, margin=dict(l=10,r=10,t=10,b=10), paper_bgcolor='rgba(0,0,0,0)')
     st.plotly_chart(fig_traj, use_container_width=True)
@@ -163,7 +184,7 @@ with col_right:
     
     def get_sens_score(val, v_min, v_max, inv=False):
         if v_max == v_min: return 100
-        s = (val - v_min) / (v_max - v_min) * 100
+        s = (val - v_min) / (v_max - v_min + 1e-6) * 100
         return (100 - s) if inv else s
 
     scores = [
@@ -190,7 +211,7 @@ st.markdown("<div class='chart-title'>📋 專家系統診斷日誌 (Kaggle Rese
 st.markdown(f"""
 <div class='terminal-log'>
 [LOG] 2026-03-01 | 機櫃 #{selected_id:03d} | 模型架構：Ridge + XGBoost Residual Learning<br>
-[DATA] 物理退化因子 (Tau): {row['Tau']:.4f} | 累積 Ah: {np.exp(row['Cum_Ah_log1p']):.1f}<br>
-[ADVICE] 透過 PIMS 驗證，預測軌跡符合物理不可逆律。目前設備健康度為 {row['SOH']:.1f}%。
+[DATA] 物理退化因子 (Tau): {row['Tau']:.4f} | 累積能量感測: {np.exp(row['Cum_Ah_log1p']):.1f} Ah<br>
+[ADVICE] 已修正初期活化跳動。目前的 SOH 健康評分為 {row['SOH']:.1f}%，預測曲線符合物理單調性規律。
 </div>
 """, unsafe_allow_html=True)
