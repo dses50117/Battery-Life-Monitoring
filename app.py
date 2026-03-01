@@ -13,7 +13,7 @@ from sklearn.isotonic import IsotonicRegression
 # ==========================================
 # 0. 頁面配置與極致黑 SCADA 風格
 # ==========================================
-st.set_page_config(page_title="PRO-BMS | 全局監控戰情室 v6.0", layout="wide")
+st.set_page_config(page_title="電池壽命監控看板", layout="wide")
 
 st.markdown("""
 <style>
@@ -146,7 +146,7 @@ y_mono = iso.fit_transform(batt_df.index.astype(float), y_final)
 # ==========================================
 # 5. 戰情室大螢幕 (SCADA Main)
 # ==========================================
-st.markdown("<div class='pro-title'>▯ PRO-BMS | 智慧儲能機櫃全局監控戰情室</div>", unsafe_allow_html=True)
+st.markdown("<div class='pro-title'>電池壽命監控看板</div>", unsafe_allow_html=True)
 
 row = batt_df.iloc[st.session_state.current_idx]
 pred_rul_now = int(y_mono[st.session_state.current_idx])
