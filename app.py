@@ -14,7 +14,7 @@ from sklearn.isotonic import IsotonicRegression
 # ==========================================
 # 0. 頁面基本設置與樣式 (Setup)
 # ==========================================
-st.set_page_config(page_title="PRO-BMS | Global Battery Health Monitoring System", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="PRO-BMS | 智慧儲能機櫃全局監控戰情室 (SCADA System)", layout="wide", initial_sidebar_state="expanded")
 
 # 引入自定義 CSS (PRO-BMS 純粹暗黑與霓虹綠風格)
 st.markdown("""
@@ -75,6 +75,21 @@ st.markdown("""
         margin-bottom: -15px; /* 貼近圖表 */
         font-weight: 400;
         letter-spacing: 0.5px;
+    }
+    
+    /* SCADA 方塊方格 (Grid Box) */
+    .grid-box {
+        border-radius: 4px;
+        padding: 10px;
+        margin: 5px;
+        text-align: center;
+        border: 1px solid #333;
+        transition: all 0.3s ease;
+    }
+    .grid-box:hover {
+        transform: scale(1.05);
+        border-color: #00ffca;
+        cursor: pointer;
     }
     
     /* 終端機風格 Log 區塊 */
@@ -151,78 +166,145 @@ if not os.path.exists("Battery_RUL.csv"):
     st.stop()
 
 full_df = get_processed_data("Battery_RUL.csv")
+unique_ids = full_df["Battery_ID"].unique()
 
 with st.sidebar:
-    st.markdown("<div style='color:#00ffca; font-size:1.2rem; margin-bottom: 20px;'>⚙️ CONFIGURATION</div>", unsafe_allow_html=True)
-    
-    selected_id = st.selectbox(
-        "BATTERY ASSET ID", 
-        options=full_df["Battery_ID"].unique(), 
-        format_func=lambda x: f"UNIT #{x:03d}"
-    )
+    st.markdown("<div style='color:#00ffca; font-size:1.2rem; margin-bottom: 20px;'>⚙️ 系統參數設定 (CONFIGURATION)</div>", unsafe_allow_html=True)
     
     daily_cycles = st.slider(
-        "UTILIZATION RATE (CYCLES/DAY)", 
+        "機櫃稼動率 (循環次數/日)", 
         min_value=0.2, max_value=4.0, value=1.5, step=0.1
     )
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    batt_df = full_df[full_df["Battery_ID"] == selected_id].reset_index(drop=True)
-    max_idx = len(batt_df) - 1
+    # 決定全局時間軸的長度 (以壽命最長的那顆電池為準)
+    max_global_idx = full_df.groupby("Battery_ID").size().max() - 1
+    
     current_idx = st.slider(
-        "SIMULATE TIMELINE (CYCLE INDEX)", 
-        min_value=0, max_value=max_idx, value=max_idx // 2
+        "時間軸推演 (全局循環次數模擬)", 
+        min_value=0, max_value=int(max_global_idx), value=int(max_global_idx // 2)
     )
-
-row = batt_df.iloc[current_idx]
+    
+    st.markdown("---")
+    st.markdown("<div style='color:#aaaaaa; font-size:0.9rem; margin-bottom: 10px;'>🔍 深度診斷目標 (Drill-Down Target)</div>", unsafe_allow_html=True)
+    selected_id = st.selectbox(
+        "指定分析機櫃單元 (Asset ID)", 
+        options=unique_ids, 
+        format_func=lambda x: f"電池陣列 #{x:03d}"
+    )
 
 # 取得已經訓練好的模型
 model_data = load_light_model("probms_model.pkl")
 
 # ==========================================
-# 3. 頂部看板層 (Strategic Layer)
+# 3. 頂部看板層 (Strategic Layer - 廠區總覽)
 # ==========================================
 # Main Title
-st.markdown("<div class='pro-title'>▯ PRO-BMS | Global Battery Health Monitoring System (v2.4 Physics-KAN/XGBoost)</div>", unsafe_allow_html=True)
+st.markdown("<div class='pro-title'>▯ PRO-BMS | 智慧儲能機櫃全局監控戰情室 (SCADA System v5.0)</div>", unsafe_allow_html=True)
 
-# 計算 KPI
-rem_cycles = int(row["RUL"])
-rem_years = rem_cycles / (daily_cycles * 365)
-soh_val = float(row['SOH_Percentage'])
+# 預計算所有電池在目前時間點的狀態以供全廠 KPI 與 Grid 使用
+plant_status = []
+for uid in unique_ids:
+    bdf = full_df[full_df["Battery_ID"] == uid].reset_index(drop=True)
+    c_idx = min(current_idx, len(bdf) - 1)
+    row = bdf.iloc[c_idx]
+    
+    soh_val = float(row['SOH_Percentage'])
+    ir_val = float(row['IR_Proxy'])
+    
+    status = "NORMAL"
+    color = "#00ff00" # 亮綠
+    bg_color = "rgba(0, 255, 0, 0.1)"
+    if soh_val < 80 or ir_val > 0.2:
+        status = "WARNING"
+        color = "#ffaa00"
+        bg_color = "rgba(255, 170, 0, 0.1)"
+    if soh_val < 70:
+        status = "CRITICAL"
+        color = "#ff4040"
+        bg_color = "rgba(255, 64, 64, 0.15)"
+        
+    plant_status.append({
+        "id": uid, "soh": soh_val, "status": status, 
+        "color": color, "bg_color": bg_color
+    })
 
-# 定義狀態
-sys_status = "NORMAL"
-sys_color = "#00ff00" # 預設亮綠
-if soh_val < 80 or float(row['IR_Proxy']) > 0.2:
-    sys_status = "WARNING"
-    sys_color = "#ffaa00"
-if soh_val < 70:
-    sys_status = "CRITICAL"
-    sys_color = "#ff4040"
+# 全廠 KPI 計算
+avg_soh = np.mean([p["soh"] for p in plant_status])
+critical_count = sum(1 for p in plant_status if p["status"] == "CRITICAL")
+warning_count = sum(1 for p in plant_status if p["status"] == "WARNING")
 
-# 自定義 HTML KPIs (4 columns)
+plant_overall_status = "連線正常 (ONLINE)"
+plant_overall_color = "#00ffca"
+if critical_count > 0:
+    plant_overall_status = "異常警報 (CRITICAL DETECTED)"
+    plant_overall_color = "#ff4040"
+elif warning_count > 0:
+    plant_overall_status = "效能衰退 (WARNING DETECTED)"
+    plant_overall_color = "#ffaa00"
+
 kpi_html = f"""
-<div style="display: flex; justify-content: space-around; margin-bottom: 40px; margin-top: 20px;">
+<div style="display: flex; justify-content: space-around; margin-bottom: 30px; margin-top: 10px;">
     <div class="kpi-container">
-        <div class="kpi-value">{rem_cycles}</div>
-        <div class="kpi-label">REMAINING CYCLES</div>
+        <div class="kpi-value">{avg_soh:.1f}%</div>
+        <div class="kpi-label">全廠平均健康度 (AVG SOH)</div>
     </div>
     <div class="kpi-container">
-        <div class="kpi-value">{rem_years:.1f}</div>
-        <div class="kpi-label">ESTIMATED YEARS</div>
+        <div class="kpi-value" style="color: {'#ff4040' if critical_count > 0 else '#00ffca'};">{critical_count}</div>
+        <div class="kpi-label">高危險機櫃數量 (CRITICAL UNITS)</div>
     </div>
     <div class="kpi-container">
-        <div class="kpi-value">{soh_val:.1f}%</div>
-        <div class="kpi-label">STATE OF HEALTH</div>
+        <div class="kpi-value" style="color: {'#ffaa00' if warning_count > 0 else '#00ffca'};">{warning_count}</div>
+        <div class="kpi-label">效能衰退機櫃數量 (WARNING UNITS)</div>
     </div>
     <div class="kpi-container">
-        <div class="kpi-value-status" style="color: {sys_color};">{sys_status}</div>
-        <div class="kpi-label">SYSTEM STATUS</div>
+        <div class="kpi-value-status" style="color: {plant_overall_color}; font-size: 2.2rem; padding-top:15px;">{plant_overall_status}</div>
+        <div class="kpi-label">全廠系統狀態 (PLANT STATUS)</div>
     </div>
 </div>
 """
 st.markdown(kpi_html, unsafe_allow_html=True)
+
+st.markdown("<hr>", unsafe_allow_html=True)
+
+# ==========================================
+# 3.5. 廠區拓樸全景 (Grid Map Box Array)
+# ==========================================
+st.markdown("<div class='chart-title' style='margin-bottom: 10px; font-size: 1.1rem; color: #00ffca;'>▯ 廠區機櫃陣列拓樸 (Plant Grid Topology)</div>", unsafe_allow_html=True)
+st.caption("即時顯示全廠 14 個電池模組的健康分佈。時間軸推遲將模擬未來衰退情況。")
+
+# 使用 Streamlit columns 繪製 Grid
+grid_cols = st.columns(7)
+for i, p in enumerate(plant_status):
+    col = grid_cols[i % 7]
+    with col:
+        border_weight = "3px" if p["id"] == selected_id else "1px"
+        border_color = "#ffffff" if p["id"] == selected_id else "#333333"
+        grid_html = f"""
+        <div class="grid-box" style="background-color: {p['bg_color']}; border-color: {border_color}; border-width: {border_weight};">
+            <div style="color: #ffffff; font-size: 1.1rem; font-weight: bold;">#{p['id']:03d}</div>
+            <div style="color: {p['color']}; font-size: 0.8rem; margin-top: 5px; font-weight: bold;">{p['status']}</div>
+            <div style="color: #aaaaaa; font-size: 0.75rem;">SOH: {p['soh']:.1f}%</div>
+        </div>
+        """
+        st.markdown(grid_html, unsafe_allow_html=True)
+
+st.markdown("<br><hr>", unsafe_allow_html=True)
+
+# ==========================================
+# 4. 深度診斷區 (Drill-Down Layer)
+# ==========================================
+st.markdown(f"<div class='chart-title' style='margin-bottom: 20px; font-size: 1.1rem; color: #00ffca;'>▯ 指定機櫃深度診斷：陣列 #{selected_id:03d} (Asset Drill-Down)</div>", unsafe_allow_html=True)
+
+batt_df = full_df[full_df["Battery_ID"] == selected_id].reset_index(drop=True)
+c_idx = min(current_idx, len(batt_df) - 1)
+row = batt_df.iloc[c_idx]
+
+# 取得剛才在迴圈中算好的單元狀態
+target_status = next(item for item in plant_status if item["id"] == selected_id)
+sys_status = target_status["status"]
+soh_val = target_status["soh"]
 
 # ==========================================
 # 4. 中部分析層 (Tactical Layer)
@@ -234,17 +316,17 @@ with col_main:
     fig_line = go.Figure()
     
     # 歷史軌跡 (實際值)
-    hist_x = batt_df.index[:current_idx+1]
-    hist_y = batt_df['RUL'].iloc[:current_idx+1]
+    hist_x = batt_df.index[:c_idx+1]
+    hist_y = batt_df['RUL'].iloc[:c_idx+1]
     fig_line.add_trace(go.Scatter(
         x=hist_x, y=hist_y,
-        name="Observed Path", mode='lines',
+        name="觀測軌跡 (Observed)", mode='lines',
         line=dict(color='#00ffca', width=3)
     ))
     
     # AI 預測軌跡 (動態推論未來到生命週期結束)
-    if current_idx < len(batt_df) - 1:
-        future_df = batt_df.iloc[current_idx:].copy()
+    if c_idx < len(batt_df) - 1:
+        future_df = batt_df.iloc[c_idx:].copy()
         
         # 進行預測
         X_c_fut = model_data["sc_clock"].transform(future_df[model_data["clock_features"]].values)
@@ -261,7 +343,7 @@ with col_main:
         pred_x = future_df.index
         fig_line.add_trace(go.Scatter(
             x=pred_x, y=mono_pred,
-            name="AI Forecast", mode='lines',
+            name="AI 預測 (Forecast)", mode='lines',
             line=dict(color='#666666', dash='dash', width=2)
         ))
     
@@ -269,26 +351,26 @@ with col_main:
         template="plotly_dark", 
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
         height=280, margin=dict(l=40, r=20, t=40, b=40),
-        xaxis=dict(title="Cycle Index", showgrid=True, gridcolor='#1a1a1a', gridwidth=1, zerolinecolor='#1a1a1a', color='#aaaaaa'),
-        yaxis=dict(title="RUL (Cycles)", showgrid=True, gridcolor='#1a1a1a', gridwidth=1, zerolinecolor='#1a1a1a', color='#aaaaaa'),
+        xaxis=dict(title="循環次數 (Cycle Index)", showgrid=True, gridcolor='#1a1a1a', gridwidth=1, zerolinecolor='#1a1a1a', color='#aaaaaa'),
+        yaxis=dict(title="剩餘壽命 RUL (Cycles)", showgrid=True, gridcolor='#1a1a1a', gridwidth=1, zerolinecolor='#1a1a1a', color='#aaaaaa'),
         legend=dict(orientation="v", yanchor="top", y=0.95, xanchor="right", x=0.98, bgcolor='rgba(0,0,0,0.5)', bordercolor='#444')
     )
     st.plotly_chart(fig_line, use_container_width=True)
 
 with col_side:
-    st.markdown("<div class='chart-title'>▯ 物理健康雷達圖 (Physical Health Radar)</div>", unsafe_allow_html=True)
+    st.markdown("<div class='chart-title'>▯ 物理健康雷達圖 (Physical Radar)</div>", unsafe_allow_html=True)
     
     radar_soh = float(np.nan_to_num(row.get('SOH_Percentage', 100), nan=100.0))
     ir_val_safe = float(np.nan_to_num(row.get('IR_Proxy', 0), nan=0.0))
     radar_res = max(0.0, 100.0 - (ir_val_safe / 0.8) * 100.0)
     pol_val_safe = float(np.nan_to_num(row.get('CV_Ratio_EMA', 0), nan=0.0))
     radar_pol = max(0.0, 100.0 - pol_val_safe * 100.0)
-    radar_vd = radar_res * 0.95 # Mock Voltage Drop based on Resistance
-    radar_th = float(np.nan_to_num(row.get('Temp_Proxy', 20), nan=20.0)) / 40 * 100 # Mock Thermal
+    radar_vd = radar_res * 0.95 
+    radar_th = float(np.nan_to_num(row.get('Temp_Proxy', 20), nan=20.0)) / 40 * 100 
     
     radar_data = pd.DataFrame(dict(
         r=[radar_soh, radar_res, radar_vd, radar_pol, radar_th],
-        theta=['Capacity', 'Resistance', 'Voltage Drop', 'CV Ratio', 'Thermal']
+        theta=['蓄電容量', '低內阻', '低壓降', '穩定極化', '熱失控風險']
     ))
     
     fig_radar = px.line_polar(
@@ -325,42 +407,42 @@ shap_vals = model_data["explainer"].shap_values(current_features_sc)[0]
 
 # 將零碎特徵聚合成大類顯示
 shap_dict = {
-    "Capacity Fade": 0.0, "Internal Resistance": 0.0, "Polarization": 0.0,
-    "Voltage Drop": 0.0, "Cycle Stress": 0.0
+    "電池容量衰減": 0.0, "內部阻抗升高": 0.0, "極化效應": 0.0,
+    "電壓降異常": 0.0, "累積循環應力": 0.0
 }
 for i, feat in enumerate(model_data["features"]):
     val = abs(shap_vals[i])
-    if "Cap" in feat: shap_dict["Capacity Fade"] += val
-    elif "IR" in feat: shap_dict["Internal Resistance"] += val
-    elif "CV" in feat: shap_dict["Polarization"] += val
-    elif "Cycle" in feat or "Ah" in feat: shap_dict["Cycle Stress"] += val
-    else: shap_dict["Voltage Drop"] += val
+    if "Cap" in feat: shap_dict["電池容量衰減"] += val
+    elif "IR" in feat: shap_dict["內部阻抗升高"] += val
+    elif "CV" in feat: shap_dict["極化效應"] += val
+    elif "Cycle" in feat or "Ah" in feat: shap_dict["累積循環應力"] += val
+    else: shap_dict["電壓降異常"] += val
 
 # 如果因剛開始訓練或數值極小而全為0，給予微小基礎值以便顯示圖表
 if sum(shap_dict.values()) == 0:
-    shap_dict = {"Capacity Fade": 0.35, "Internal Resistance": 0.28, "Polarization": 0.15, "Voltage Drop": 0.10, "Cycle Stress": 0.12}
+    shap_dict = {"電池容量衰減": 0.35, "內部阻抗升高": 0.28, "極化效應": 0.15, "電壓降異常": 0.10, "累積循環應力": 0.12}
 
 if sys_status == "CRITICAL" or soh_val < 70:
-    log_lines.append(f"<span style='color:#aaaaaa'>[{current_idx:04d}]</span> 🚨 CRITICAL: 電池 #{selected_id:03d} 容量已低於臨界點 (SOH {soh_val:.1f}%).")
-    log_lines.append(f"<span style='color:#aaaaaa'>[{current_idx:04d}]</span> 🛑 行動建議: 立即停機，安排電池模組抽換作業。")
-    shap_dict["Capacity Fade"] = 0.65; shap_dict["Internal Resistance"] = 0.15
+    log_lines.append(f"<span style='color:#aaaaaa'>[{c_idx:04d}]</span> 🚨 CRITICAL: 單元 #{selected_id:03d} 容量已低於臨界點 (SOH {soh_val:.1f}%).")
+    log_lines.append(f"<span style='color:#aaaaaa'>[{c_idx:04d}]</span> 🛑 處置建議: 立即將該模組從儲能陣列中隔離停機，安排抽換作業。")
+    shap_dict["電池容量衰減"] = 0.65; shap_dict["內部阻抗升高"] = 0.15
 
 elif sys_status == "WARNING" or ir_val > 0.2:
-    log_lines.append(f"<span style='color:#aaaaaa'>[{current_idx:04d}]</span> ⚠️ 警告: 偵測到充放電內阻異常升高 (IR Proxy: {ir_val:.3f}V).")
-    log_lines.append(f"<span style='color:#aaaaaa'>[{current_idx:04d}]</span> 🛠️ 行動建議: 於 30 日內安排端子清潔與接點阻抗檢查。")
-    log_lines.append(f"<span style='color:#aaaaaa'>[{current_idx:04d}]</span> 💡 系統已自動觸發散熱模組強化運轉。")
-    shap_dict["Internal Resistance"] = 0.50; shap_dict["Capacity Fade"] = 0.20
+    log_lines.append(f"<span style='color:#aaaaaa'>[{c_idx:04d}]</span> ⚠️ WARNING: 偵測到充放電內阻異常升高 (IR Proxy: {ir_val:.3f}V).")
+    log_lines.append(f"<span style='color:#aaaaaa'>[{c_idx:04d}]</span> 🛠️ 處置建議: 於 30 日內安排端子清潔與接點阻抗檢查。")
+    log_lines.append(f"<span style='color:#aaaaaa'>[{c_idx:04d}]</span> 💡 系統自動反應: 已自動觸發散熱模組強化運轉。")
+    shap_dict["內部阻抗升高"] = 0.50; shap_dict["電池容量衰減"] = 0.20
 
 elif pol_val > 0.2:
-    log_lines.append(f"<span style='color:#aaaaaa'>[{current_idx:04d}]</span> ℹ️ 提示: 恆壓充電 (CV) 佔比偏高 (Polarization 效應)。")
-    log_lines.append(f"<span style='color:#aaaaaa'>[{current_idx:04d}]</span> ⚡ 行動建議: 建議下次充電時進行深度慢充校正。")
-    shap_dict["Polarization"] = 0.40; shap_dict["Capacity Fade"] = 0.30
+    log_lines.append(f"<span style='color:#aaaaaa'>[{c_idx:04d}]</span> ℹ️ INFO: 恆壓充電 (CV) 佔比偏高 (Polarization 極化效應明顯)。")
+    log_lines.append(f"<span style='color:#aaaaaa'>[{c_idx:04d}]</span> ⚡ 處置建議: 建議 BMS 於下次充電循環時進行深度慢充校正。")
+    shap_dict["極化效應"] = 0.40; shap_dict["電池容量衰減"] = 0.30
     
 else:
-    log_lines.append(f"<span style='color:#aaaaaa'>[{current_idx:04d}]</span> ✅ 電池 #{selected_id:03d} 狀態已更新為 <span style='color:#00ff00'>NORMAL</span>.")
-    log_lines.append(f"<span style='color:#aaaaaa'>[{current_idx:04d}]</span> 📊 未偵測到高風險物理降解特徵。")
-    log_lines.append(f"<span style='color:#aaaaaa'>[{current_idx:04d}]</span> 🗓️ 建議: 6 個月後進行例行性保養。")
-    log_lines.append(f"<span style='color:#aaaaaa'>[{current_idx:04d}]</span> 🌊 [Action] 冷卻系統自檢已通過。系統準備就緒。")
+    log_lines.append(f"<span style='color:#aaaaaa'>[{c_idx:04d}]</span> ✅ 單元 #{selected_id:03d} 狀態 <span style='color:#00ff00'>NORMAL</span>.")
+    log_lines.append(f"<span style='color:#aaaaaa'>[{c_idx:04d}]</span> 📊 感測數據未偵測到高風險物理降解徵兆。")
+    log_lines.append(f"<span style='color:#aaaaaa'>[{c_idx:04d}]</span> 🗓️ 維護建議: 維持原定 6 個月後之例行性保養。")
+    log_lines.append(f"<span style='color:#aaaaaa'>[{c_idx:04d}]</span> 🌊 自動檢測: 冷卻迴路自檢已通過，系統準備就緒。")
 
 with col_diag1:
     st.markdown("<div class='chart-title'>▯ AI 衰退因素歸因分析 (AI Attribution Analysis)</div>", unsafe_allow_html=True)
@@ -377,21 +459,21 @@ with col_diag1:
     fig_bar.update_layout(
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
         height=220, margin=dict(l=10, r=20, t=30, b=30),
-        xaxis=dict(title="Impact Score (SHAP)", showgrid=True, gridcolor='#1a1a1a', zerolinecolor='#1a1a1a', color='#aaaaaa'),
+        xaxis=dict(title="歸因影響力 (Impact Score - SHAP)", showgrid=True, gridcolor='#1a1a1a', zerolinecolor='#1a1a1a', color='#aaaaaa'),
         yaxis=dict(title="", showgrid=False, color='#aaaaaa')
     )
     st.plotly_chart(fig_bar, use_container_width=True)
 
 with col_diag2:
-    st.markdown("<div class='chart-title' style='margin-bottom: 5px;'>▯ 維護總結與日誌 (Maintenance Log & Recommendations)</div>", unsafe_allow_html=True)
+    st.markdown("<div class='chart-title' style='margin-bottom: 5px;'>▯ 機櫃維護日誌與專家建議 (Maintenance Log & Advice)</div>", unsafe_allow_html=True)
     
     terminal_html = "<div class='terminal-log'>"
-    terminal_html += "SYSTEM ADVICE:<br><br>"
+    terminal_html += "AI SYSTEM ADVICE:<br><br>"
     for line in log_lines:
         terminal_html += f"&nbsp;&nbsp;{line}<br>"
     if sys_status == "NORMAL":
-        terminal_html += "<br>Ready for high-intensity operation.</div>"
+        terminal_html += "<br>>> Ready for high-intensity operation.</div>"
     else:
-        terminal_html += "<br><span style='color:#ffaa00'>System requires attention.</span></div>"
+        terminal_html += "<br>>> <span style='color:#ffaa00'>System requires operator attention.</span></div>"
 
     st.markdown(terminal_html, unsafe_allow_html=True)
