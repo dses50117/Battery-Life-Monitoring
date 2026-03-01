@@ -8,7 +8,7 @@ import os
 # ==========================================
 # 0. 頁面基本設置與樣式 (Setup)
 # ==========================================
-st.set_page_config(page_title="🔋 企業級 BMS 監控平台", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="BMS 監控平台:壽命預測與健康診斷", layout="wide", initial_sidebar_state="expanded")
 
 # 引入自定義 CSS 實現玻璃纖維與深色工業風
 st.markdown("""
@@ -112,7 +112,7 @@ row = batt_df.iloc[current_idx]
 # ==========================================
 # 3. 頂部看板層 (Strategic Layer)
 # ==========================================
-st.title("🔋 企業級 BMS 監控平台：AI 壽命預測與健康診斷")
+st.title("BMS 監控平台:壽命預測與健康診斷")
 st.markdown(f"> 🟢 **系統狀態：連線正常** | **被控資產：** `電池組 #{selected_id:03d}` | **當前時間點：** 第 `{int(row['Cycle_Index'])}` 循環")
 
 # 計算 KPI
