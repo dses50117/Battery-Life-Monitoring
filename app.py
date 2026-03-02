@@ -157,7 +157,9 @@ with col_left:
     
     fig_traj.update_layout(
         template="plotly_dark", height=380, margin=dict(l=10,r=10,t=10,b=10),
-        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#ffffff'),
+        legend=dict(font=dict(color='#ffffff'))
     )
     st.plotly_chart(fig_traj, use_container_width=True)
 
