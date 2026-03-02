@@ -139,7 +139,7 @@ k1, k2, k3, k4 = st.columns(4)
 k1.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:#00ffca'>{pred_rul_now}</div><div class='kpi-label'>AI 預測 RUL (Cycles)</div></div>", unsafe_allow_html=True)
 k2.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:#00ffca'>{rem_years:.1f}</div><div class='kpi-label'>預估可用年資</div></div>", unsafe_allow_html=True)
 k3.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{alarm_color}'>{row['SOH']:.1f}%</div><div class='kpi-label'>健康評分 (SOH)</div></div>", unsafe_allow_html=True)
-k4.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{alarm_color}; font-size:1.8rem; padding-top:15px;'>{alarm_status}</div><div class='kpi-label'>機櫃狀態</div></div>", unsafe_allow_html=True)
+k4.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{alarm_color}; font-size:1.4rem; height:4.5rem; display:flex; align-items:center; justify-content:center;'>{alarm_status}</div><div class='kpi-label'>機櫃狀態</div></div>", unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
