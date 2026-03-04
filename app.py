@@ -167,12 +167,31 @@ with col_left:
     fig_traj.add_vline(x=st.session_state.current_idx, line_dash="dash", line_color="#ff4040")
     
     fig_traj.update_layout(
-        template="plotly_dark", height=380, margin=dict(l=10,r=10,t=10,b=10),
+        template="plotly_dark", height=280, margin=dict(l=10,r=10,t=10,b=10),
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
         font=dict(color='#ffffff'),
         legend=dict(font=dict(color='#ffffff'))
     )
     st.plotly_chart(fig_traj, use_container_width=True)
+
+    st.markdown("<div class='chart-title'>📉 SOH (健康度) 歷史衰退曲線</div>", unsafe_allow_html=True)
+    fig_soh = go.Figure()
+    fig_soh.add_trace(go.Scatter(
+        x=batt_df.index[:st.session_state.current_idx+1], 
+        y=batt_df['SOH'].iloc[:st.session_state.current_idx+1], 
+        name="SOH (%)", mode='lines+markers', line=dict(color='#ffb300', width=2),
+        marker=dict(color='#ffb300', size=4)
+    ))
+    fig_soh.add_vline(x=st.session_state.current_idx, line_dash="dash", line_color="#ff4040")
+    
+    fig_soh.update_layout(
+        template="plotly_dark", height=240, margin=dict(l=10,r=10,t=10,b=10),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#ffffff'),
+        legend=dict(font=dict(color='#ffffff')),
+        yaxis=dict(range=[0, 105], gridcolor='#333')
+    )
+    st.plotly_chart(fig_soh, use_container_width=True)
 
 with col_right:
     st.markdown("<div class='chart-title'>🧩 物理健康雷達</div>", unsafe_allow_html=True)
