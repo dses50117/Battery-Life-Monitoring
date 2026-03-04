@@ -41,8 +41,16 @@ st.markdown("""
     
     /* 避免 Auto-refresh 產生右上角閃爍的小人 (Running Indicator) 或降低整個畫面透明度 */
     div[data-testid="stStatusWidget"] { visibility: hidden !important; height: 0px !important; position: fixed !important; }
-    [data-testid="stAppViewBlockContainer"] { transition: none !important; animation: none !important; opacity: 1 !important; filter: none !important; }
+    div[data-testid="stAppViewBlockContainer"] { transition: none !important; animation: none !important; opacity: 1 !important; filter: none !important; }
     .stApp > header { background-color: transparent !important; }
+    
+    /* 強制移除所有 Streamlit 元件載入時的微透明閃爍效果 */
+    [data-testid="stAppViewContainer"] > section:nth-child(2) > div:first-child { opacity: 1 !important; transition: none !important; }
+    div[style*="opacity: 0.6"] { opacity: 1 !important; transition: none !important; }
+    div[style*="opacity: 0.5"] { opacity: 1 !important; transition: none !important; }
+    .st-emotion-cache-1cvow4s { opacity: 1 !important; }
+    .st-emotion-cache-1kyxreq { opacity: 1 !important; }
+    .st-emotion-cache-16fdsce { opacity: 1 !important; }
 </style>
 """, unsafe_allow_html=True)
 
