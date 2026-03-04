@@ -157,6 +157,36 @@ k4.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{al
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+if row['SOH'] < 70.0:
+    st.markdown("""
+    <div style='background-color: rgba(255, 64, 64, 0.1); border-left: 5px solid #ff4040; padding: 15px; margin-bottom: 20px; border-radius: 4px;'>
+        <h3 style='color: #ff4040; margin-top: 0;'>🚨 警報處置建議 (SOP)：CRITICAL 立即停機</h3>
+        <p style='color: #ffffff; font-size: 0.95rem; margin-bottom: 15px;'>當 SOH &lt; 70 觸發停機時，操作員應執行以下標準處置：</p>
+        
+        <h4 style='color: #ffb300; margin-bottom: 5px;'>第一步：安全隔離與靜置 (Isolation &amp; Resting)</h4>
+        <ul style='color: #dddddd; font-size: 0.9rem; margin-bottom: 15px;'>
+            <li><b>系統面：</b>BMS (電池管理系統) 應自動或由操作員手動將該組機櫃從直流母線 (DC Bus) 上斷開，停止參與電網的充放電調度。</li>
+            <li><b>物理面：</b>讓機櫃進入實體靜置狀態，這正是為了讓內部極化現象緩解，並防止熱失控 (Thermal Runaway) 的風險。</li>
+        </ul>
+        
+        <h4 style='color: #ffb300; margin-bottom: 5px;'>第二步：利用「健康雷達圖」進行深度診斷</h4>
+        <p style='color: #dddddd; font-size: 0.9rem; margin-bottom: 5px;'>停機後，操作員應立刻查看我們看板右側的<b>「物理健康雷達」</b>，抓出是哪個特徵導致 SOH 暴跌：</p>
+        <ul style='color: #dddddd; font-size: 0.9rem; margin-bottom: 15px;'>
+            <li><b>如果是「低內阻」指標往內縮：</b>代表電池內部老化嚴重，可能需要準備汰換模組。</li>
+            <li><b>如果是「極化穩定」或「壓降健康」往內縮：</b>可能是近期高頻率調度導致的過度疲勞，靜置一段時間或執行電芯均衡 (Cell Balancing) 後即可改善。</li>
+        </ul>
+        
+        <h4 style='color: #ffb300; margin-bottom: 5px;'>第三步：執行主維護 (Active Maintenance)</h4>
+        <ul style='color: #dddddd; font-size: 0.9rem; margin-bottom: 15px;'>
+            <li><b>啟動主動均衡：</b>透過硬體對單體電芯進行充放電微調，解決木桶效應（某幾顆老鼠屎電芯拖垮整體容量）。</li>
+            <li><b>檢查散熱與溫控：</b>高溫是電池殺手，需稽核該機櫃的空調與液冷系統是否異常。</li>
+        </ul>
+        
+        <h4 style='color: #ffb300; margin-bottom: 5px;'>第四步：降載運行或汰換評估 (Second-life Assessment)</h4>
+        <p style='color: #dddddd; font-size: 0.9rem; margin-bottom: 0;'>如果靜置與均衡後，SOH 依然在 70% 邊緣徘徊，廠長就必須透過左側的「預估可用年資」來決策：是要將這組機櫃降級使用（例如把「每日循環強度」調低，只做輕度備用電源），還是直接編列預算進行模組抽換。</p>
+    </div>
+    """, unsafe_allow_html=True)
+
 col_left, col_right = st.columns([2, 1.2])
 
 with col_left:
