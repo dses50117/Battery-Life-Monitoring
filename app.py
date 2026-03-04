@@ -112,10 +112,21 @@ with st.sidebar:
 
 if auto_play:
     st_autorefresh(interval=500, limit=len(batt_df) - st.session_state.current_idx, key="auto_refresh")
+    
+    run_days = st.session_state.current_idx / daily_cycles
+    st.sidebar.markdown(f"""
+    <div style='padding: 10px; background: rgba(0, 255, 202, 0.1); border: 1px solid #00ffca; border-radius: 5px; text-align: center; margin-top: 10px; margin-bottom: 15px;'>
+        <div style='font-size: 0.85rem; color: #ccc;'>▶️ 自動播放進度 (Cycle {st.session_state.current_idx})</div>
+        <div style='font-size: 1.4rem; color: #00ffca; font-weight: bold;'>相當於已運轉 {run_days:.1f} 天</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
     if st.session_state.current_idx < len(batt_df) - 1:
         st.session_state.current_idx += 1
 else:
     st.session_state.current_idx = st.sidebar.slider("時間軸模擬 (Cycle)", 0, len(batt_df)-1, st.session_state.current_idx)
+    run_days = st.session_state.current_idx / daily_cycles
+    st.sidebar.markdown(f"<div style='text-align: right; color: #00ffca; font-size: 0.9rem; margin-top: -15px; margin-bottom: 10px;'>相當於已運轉: <b>{run_days:.1f}</b> 天</div>", unsafe_allow_html=True)
 
 # ==========================================
 # 3. 實時推論與警報邏輯
