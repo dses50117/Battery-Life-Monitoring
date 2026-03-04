@@ -38,6 +38,11 @@ st.markdown("""
     .kpi-label { font-size: 0.8rem; color: #ffffff; text-transform: uppercase; }
     .chart-title { color: #ffffff; font-size: 1rem; border-left: 4px solid #00ffca; padding-left: 10px; margin-top: 10px; margin-bottom: 10px; }
     .terminal-log { font-family: 'Courier New', monospace; color: #00ffca; font-size: 0.85rem; padding: 10px; background: #050505; border: 1px solid #333; border-radius: 5px; }
+    
+    /* 避免 Auto-refresh 產生右上角閃爍的小人 (Running Indicator) 或降低整個畫面透明度 */
+    div[data-testid="stStatusWidget"] { visibility: hidden !important; height: 0px !important; position: fixed !important; }
+    [data-testid="stAppViewBlockContainer"] { transition: none !important; animation: none !important; opacity: 1 !important; filter: none !important; }
+    .stApp > header { background-color: transparent !important; }
 </style>
 """, unsafe_allow_html=True)
 
