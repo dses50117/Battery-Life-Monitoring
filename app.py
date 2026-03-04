@@ -232,7 +232,8 @@ def generate_pdf(batt_id, current_cycle, rul, rem_years, soh, status, clip_count
     pdf.add_page()
     
     # 載入同目錄下的免費開源字型 (Noto Sans TC) 來支援繁體中文
-    font_path = "NotoSansTC.ttf"
+    import os
+    font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NotoSansTC.ttf")
     if os.path.exists(font_path):
         pdf.add_font("NotoSans", "", font_path)
         pdf.set_font("NotoSans", size=18)
