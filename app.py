@@ -260,7 +260,7 @@ def generate_pdf(batt_id, current_cycle, rul, rem_years, soh, status, clip_count
     if soh < 70.0:
         pdf.ln(5)
         pdf.set_text_color(220, 53, 69) # 紅色
-        pdf.set_font("NotoSans" if os.path.exists(font_path) else "Arial", style="B", size=14)
+        pdf.set_font("NotoSans" if os.path.exists(font_path) else "Arial", size=14)
         pdf.cell(0, 10, txt="🚨 警報處置建議 (SOP)：CRITICAL 立即停機", new_x="LMARGIN", new_y="NEXT")
         pdf.set_text_color(0, 0, 0)
         pdf.set_font("NotoSans" if os.path.exists(font_path) else "Arial", size=12)
