@@ -5,6 +5,9 @@ import plotly.graph_objects as go
 import joblib
 from streamlit_autorefresh import st_autorefresh
 from sklearn.isotonic import IsotonicRegression
+from fpdf import FPDF
+import base64
+import os
 
 # ==========================================
 # 0. 頁面配置與極致黑 SCADA 風格 (Demo 單檔版 CSS)
@@ -219,12 +222,64 @@ with col_right:
     )
     st.plotly_chart(fig_radar, use_container_width=True)
 
+# ==========================================
+# 5. PDF 報表匯出功能
+# ==========================================
+def generate_pdf(batt_id, current_cycle, rul, rem_years, soh, status, clip_count):
+    pdf = FPDF()
+    pdf.add_page()
+    
+    font_path = r"C:\Windows\Fonts\msjh.ttc"
+    if os.path.exists(font_path):
+        pdf.add_font("msjh", "", font_path)
+        pdf.set_font("msjh", size=18)
+    else:
+        pdf.set_font("Arial", size=18)
+        
+    pdf.cell(0, 15, txt="電池壽命監控與診斷報告 (Battery Diagnostic Report)", new_x="LMARGIN", new_y="NEXT", align='C')
+    
+    if os.path.exists(font_path):
+        pdf.set_font("msjh", size=12)
+    else:
+        pdf.set_font("Arial", size=12)
+        
+    pdf.ln(5)
+    pdf.cell(0, 10, txt=f"匯出時間：{pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, txt=f"分析機櫃單元：電池陣列 #{batt_id:03d}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, txt=f"當前時間軸 (Cycle)：{current_cycle}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, txt=f"AI 預測剩餘壽命 (RUL)：{rul} Cycles", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, txt=f"預估可用年資：{rem_years:.1f} 年", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, txt=f"當前健康評分 (SOH)：{soh:.1f}%", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, txt=f"系統狀態判定：{status}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, txt=f"放電時間上限保護觸發次數：{clip_count} 次", new_x="LMARGIN", new_y="NEXT")
+    
+    pdf.ln(10)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 10, txt="--- 智慧儲能機櫃全局監控戰情室 (SCADA System) 自動生成 ---", new_x="LMARGIN", new_y="NEXT", align='C')
+    
+    return bytes(pdf.output())
+
+col_log, col_btn = st.columns([4, 1])
+
 clip_count = len(df_all[(df_all["Battery_ID"] == selected_id) & (df_all["Discharge Time (s)"] >= 10000)])
-st.markdown("<div class='chart-title'>📋 專家系統診斷與稽核日誌</div>", unsafe_allow_html=True)
-st.markdown(f"""
-<div class='terminal-log'>
-[SYS] 單檔 Demo 模式啟動，使用前端定時器優化效能。<br>
-[EVENT] 本機櫃共觸發 {clip_count} 次放電時間上限保護。<br>
-[LOG] 2026-03-01 | 機櫃 #{selected_id:03d} | 當前 SOH: {row['SOH']:.1f}% | 狀態判定: <span style='color:{alarm_color}'>{alarm_status}</span>
-</div>
-""", unsafe_allow_html=True)
+
+with col_log:
+    st.markdown("<div class='chart-title'>📋 專家系統診斷與稽核日誌</div>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class='terminal-log'>
+    [SYS] 單檔 Demo 模式啟動，使用前端定時器優化效能。<br>
+    [EVENT] 本機櫃共觸發 {clip_count} 次放電時間上限保護。<br>
+    [LOG] 2026-03-01 | 機櫃 #{selected_id:03d} | 當前 SOH: {row['SOH']:.1f}% | 狀態判定: <span style='color:{alarm_color}'>{alarm_status}</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col_btn:
+    st.markdown("<div style='margin-top: 45px;'></div>", unsafe_allow_html=True)
+    pdf_bytes = generate_pdf(selected_id, st.session_state.current_idx, pred_rul_now, rem_years, row['SOH'], alarm_status, clip_count)
+    st.download_button(
+        label="📄 匯出 PDF 診斷報告",
+        data=pdf_bytes,
+        file_name=f"Battery_Report_Array_{selected_id:03d}.pdf",
+        mime="application/pdf",
+        use_container_width=True
+    )
