@@ -119,7 +119,7 @@ with st.sidebar:
     auto_play = st.toggle("啟動即時監控模擬 (Auto-Play)")
 
 if auto_play:
-    st_autorefresh(interval=500, limit=len(batt_df) - st.session_state.current_idx, key="auto_refresh")
+    st_autorefresh(interval=1500, limit=len(batt_df) - st.session_state.current_idx, key="auto_refresh")
     
     run_days = st.session_state.current_idx / daily_cycles
     st.sidebar.markdown(f"""
