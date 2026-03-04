@@ -257,8 +257,31 @@ def generate_pdf(batt_id, current_cycle, rul, rem_years, soh, status, clip_count
     pdf.cell(0, 10, txt=f"系統狀態判定：{status}", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 10, txt=f"放電時間上限保護觸發次數：{clip_count} 次", new_x="LMARGIN", new_y="NEXT")
     
+    if soh < 70.0:
+        pdf.ln(5)
+        pdf.set_text_color(220, 53, 69) # 紅色
+        pdf.set_font("NotoSans" if os.path.exists(font_path) else "Arial", style="B", size=14)
+        pdf.cell(0, 10, txt="🚨 警報處置建議 (SOP)：CRITICAL 立即停機", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("NotoSans" if os.path.exists(font_path) else "Arial", size=12)
+        pdf.multi_cell(0, 8, txt=(
+            "當 SOH < 70 觸發停機時，操作員應執行以下標準處置：\n"
+            "第一步：安全隔離與靜置 (Isolation & Resting)\n"
+            "  - BMS 應斷開機櫃從直流母線上斷開。\n"
+            "  - 讓機櫃進入實體靜置狀態，緩解內部極化現象並防止熱失控。\n"
+            "第二步：利用「健康雷達圖」進行深度診斷\n"
+            "  - 低內阻往內縮：內部老化嚴重。\n"
+            "  - 極化穩定或壓降健康往內縮：可能是過度疲勞，靜置或均衡後可改善。\n"
+            "第三步：執行主動維護 (Active Maintenance)\n"
+            "  - 啟動主動均衡，微調充放電。\n"
+            "  - 檢查空調與液冷系統是否異常。\n"
+            "第四步：降載運行或汰換評估 (Second-life Assessment)\n"
+            "  - 若 SOH 依然在 70% 邊緣，評估是否降級使用或進行模組抽換。"
+        ))
+
     pdf.ln(10)
     pdf.set_text_color(100, 100, 100)
+    pdf.set_font("NotoSans" if os.path.exists(font_path) else "Arial", size=12)
     pdf.cell(0, 10, txt="--- 智慧儲能機櫃全局監控戰情室 (SCADA System) 自動生成 ---", new_x="LMARGIN", new_y="NEXT", align='C')
     
     return bytes(pdf.output())
@@ -270,6 +293,17 @@ st.markdown("""
     .stApp > header { background-color: transparent; }
     .stDownloadButton button:active { background-color: #00ffca !important; }
     div[data-testid="stAppViewBlockContainer"] { filter: none !important; transition: none !important; }
+    
+    /* 自訂下載按鈕樣式以適應深色背景 */
+    .stDownloadButton button {
+        background-color: #2b2b2b !important;
+        color: #ffffff !important;
+        border: 1px solid #4d4d4d !important;
+    }
+    .stDownloadButton button:hover {
+        border-color: #00ffca !important;
+        color: #00ffca !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
