@@ -231,17 +231,18 @@ def generate_pdf(batt_id, current_cycle, rul, rem_years, soh, status, clip_count
     pdf = FPDF()
     pdf.add_page()
     
-    font_path = r"C:\Windows\Fonts\msjh.ttc"
+    # 載入同目錄下的免費開源字型 (Noto Sans TC) 來支援繁體中文
+    font_path = "NotoSansTC.ttf"
     if os.path.exists(font_path):
-        pdf.add_font("msjh", "", font_path)
-        pdf.set_font("msjh", size=18)
+        pdf.add_font("NotoSans", "", font_path)
+        pdf.set_font("NotoSans", size=18)
     else:
         pdf.set_font("Arial", size=18)
         
     pdf.cell(0, 15, txt="電池壽命監控與診斷報告 (Battery Diagnostic Report)", new_x="LMARGIN", new_y="NEXT", align='C')
     
     if os.path.exists(font_path):
-        pdf.set_font("msjh", size=12)
+        pdf.set_font("NotoSans", size=12)
     else:
         pdf.set_font("Arial", size=12)
         
@@ -260,6 +261,16 @@ def generate_pdf(batt_id, current_cycle, rul, rem_years, soh, status, clip_count
     pdf.cell(0, 10, txt="--- 智慧儲能機櫃全局監控戰情室 (SCADA System) 自動生成 ---", new_x="LMARGIN", new_y="NEXT", align='C')
     
     return bytes(pdf.output())
+
+# 隱藏 Streamlit 下載按鈕觸發時的預設半透明反灰遮罩
+st.markdown("""
+<style>
+    /* 避免點擊下載按鈕時畫面閃爍或變暗 */
+    .stApp > header { background-color: transparent; }
+    .stDownloadButton button:active { background-color: #00ffca !important; }
+    div[data-testid="stAppViewBlockContainer"] { filter: none !important; transition: none !important; }
+</style>
+""", unsafe_allow_html=True)
 
 col_log, col_btn = st.columns([4, 1])
 
