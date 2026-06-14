@@ -136,23 +136,15 @@ st.markdown(f"""
         filter: none !important;
     }}
 
-    /* 徹底消滅 Plotly 重新渲染時的白色瞬閃 (動態主題底色覆蓋) */
-    .js-plotly-plot, .plotly, .plot-container, .main-svg,
+    /* 徹底消滅 Plotly 重新渲染時的白色瞬閃 (僅將動態背景套用於 Streamlit 的圖表外層容器與 iframe) */
     div[data-testid="stPlotlyChart"],
-    div[data-testid="stPlotlyChart"] > div {{
+    div[data-testid="stPlotlyChart"] > div,
+    iframe[title="streamlit.plotly_chart"] {{
         background-color: {bg_color} !important;
         background: {bg_color} !important;
         opacity: 1.0 !important;
         transition: none !important;
         animation: none !important;
-    }}
-    
-    /* 強制 Plotly 的載入 iframe 底色為透明，避免白底瞬閃 */
-    iframe[title="streamlit.plotly_chart"] {{
-        background-color: transparent !important;
-        background: transparent !important;
-        opacity: 1.0 !important;
-        transition: none !important;
     }}
 
     /* 鎖定圖表容器之最小高度，防止圖表在重新繪製時產生高度塌陷 */
