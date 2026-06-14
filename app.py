@@ -69,6 +69,30 @@ st.markdown("""
         opacity: 1.0 !important;
         filter: none !important;
     }
+
+    /* 徹底消滅 Plotly 重新渲染時的白色瞬閃 (純黑底色覆蓋) */
+    .js-plotly-plot, .plotly, .plot-container, .main-svg,
+    div[data-testid="stPlotlyChart"],
+    div[data-testid="stPlotlyChart"] > div {
+        background-color: #000000 !important;
+        background: #000000 !important;
+        opacity: 1.0 !important;
+        transition: none !important;
+        animation: none !important;
+    }
+    
+    /* 強制 Plotly 的載入 iframe 底色為透明，避免白底瞬閃 */
+    iframe[title="streamlit.plotly_chart"] {
+        background-color: transparent !important;
+        background: transparent !important;
+        opacity: 1.0 !important;
+        transition: none !important;
+    }
+
+    /* 鎖定圖表容器之最小高度，防止圖表在重新繪製時產生高度塌陷 (Layout Shift) */
+    div[data-testid="stPlotlyChart"]:nth-of-type(1) { min-height: 280px !important; }
+    div[data-testid="stPlotlyChart"]:nth-of-type(2) { min-height: 240px !important; }
+    div[data-testid="stPlotlyChart"]:nth-of-type(3) { min-height: 380px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -179,7 +203,7 @@ with st.sidebar:
     auto_play = st.toggle("啟動即時監控模擬 (Auto-Play)")
 
 if auto_play:
-    st_autorefresh(interval=1500, limit=len(batt_df) - st.session_state.current_idx, key="auto_refresh")
+    st_autorefresh(interval=3000, limit=len(batt_df) - st.session_state.current_idx, key="auto_refresh")
     
     run_days = st.session_state.current_idx / daily_cycles
     st.sidebar.markdown(f"""
