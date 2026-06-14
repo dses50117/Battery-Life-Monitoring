@@ -187,6 +187,8 @@ def get_advanced_data(file_path):
     df["Max_Cap_Found"] = df.groupby("Battery_ID")["Cap_EMA"].transform(lambda x: x.quantile(0.95))
     df["SOH"] = (df["Cap_EMA"] / df["Max_Cap_Found"]) * 100
     df["SOH"] = df["SOH"].clip(0.0, 100.0)
+    # Apply monotonicity constraint (SOH cannot increase)
+    df["SOH"] = df.groupby("Battery_ID")["SOH"].transform(lambda x: np.minimum.accumulate(x))
     
     for feat in ["Cap_EMA", "IR_EMA", "CV_Ratio_EMA", "Vdrop_EMA"]:
         df[f"{feat}_min"] = df.groupby("Battery_ID")[feat].transform(lambda x: x.quantile(0.05))
