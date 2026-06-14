@@ -233,7 +233,8 @@ def fit_cleaning_params(df_train_raw: pd.DataFrame) -> Dict[str, Any]:
     for c in CLEAN_CLIP_COLS:
         if c in df_train_raw.columns:
             vals = pd.to_numeric(df_train_raw[c], errors="coerce")
-            params["clip_hi"][c] = float(vals.quantile(0.999))
+            # 使用 quantile(0.98) * 1.1 來徹底、穩健地濾除 99% 以上的極端大離群值
+            params["clip_hi"][c] = float(vals.quantile(0.98) * 1.1)
     return params
 
 def apply_cleaning(df_raw: pd.DataFrame, params: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
