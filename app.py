@@ -187,8 +187,6 @@ def get_advanced_data(file_path):
     df["Max_Cap_Found"] = df.groupby("Battery_ID")["Cap_EMA"].transform(lambda x: x.quantile(0.95))
     df["SOH"] = (df["Cap_EMA"] / df["Max_Cap_Found"]) * 100
     df["SOH"] = df["SOH"].clip(0.0, 100.0)
-    # Apply monotonicity constraint (SOH cannot increase)
-    df["SOH"] = df.groupby("Battery_ID")["SOH"].transform(lambda x: np.minimum.accumulate(x))
     
     for feat in ["Cap_EMA", "IR_EMA", "CV_Ratio_EMA", "Vdrop_EMA"]:
         df[f"{feat}_min"] = df.groupby("Battery_ID")[feat].transform(lambda x: x.quantile(0.05))
@@ -268,28 +266,35 @@ with st.sidebar:
     batt_df = df_all[df_all["Battery_ID"] == selected_id].reset_index(drop=True)
     daily_cycles = st.slider("每日循環強度", 0.5, 3.0, 1.2)
     
-    if 'current_idx' not in st.session_state: 
-        st.session_state.current_idx = len(batt_df) // 2
+    max_days = float(len(batt_df) / daily_cycles)
+    if 'current_days' not in st.session_state:
+        st.session_state.current_days = max_days / 2.0
+    else:
+        st.session_state.current_days = min(st.session_state.current_days, max_days)
         
     auto_play = st.toggle("啟動即時監控模擬 (Auto-Play)")
 
 if auto_play:
-    st_autorefresh(interval=3000, limit=len(batt_df) - st.session_state.current_idx, key="auto_refresh")
+    # 設置自動播放，每次 refresh 前進 2.0 天
+    st_autorefresh(interval=3000, key="auto_refresh")
     
-    run_days = st.session_state.current_idx / daily_cycles
+    st.session_state.current_idx = int(st.session_state.current_days * daily_cycles)
+    st.session_state.current_idx = min(st.session_state.current_idx, len(batt_df) - 1)
+    
     st.sidebar.markdown(f"""
     <div style='padding: 10px; background: {sidebar_info_bg}; border: 1px solid {sidebar_info_border}; border-radius: 5px; text-align: center; margin-top: 10px; margin-bottom: 15px;'>
-         <div style='font-size: 0.85rem; color: {sub_text_color};'>▶️ 自動播放進度 (Cycle {st.session_state.current_idx})</div>
-         <div style='font-size: 1.4rem; color: {sidebar_info_text}; font-weight: bold;'>相當於已運轉 {run_days:.1f} 天</div>
+         <div style='font-size: 0.85rem; color: {sub_text_color};'>▶️ 自動播放進度 (已運轉 {st.session_state.current_days:.1f} 天)</div>
+         <div style='font-size: 1.4rem; color: {sidebar_info_text}; font-weight: bold;'>累計循環: {st.session_state.current_idx} 次</div>
     </div>
     """, unsafe_allow_html=True)
     
-    if st.session_state.current_idx < len(batt_df) - 1:
-        st.session_state.current_idx += 1
+    if st.session_state.current_days < max_days:
+        st.session_state.current_days = min(st.session_state.current_days + 2.0, max_days)
 else:
-    st.session_state.current_idx = st.sidebar.slider("時間軸模擬 (Cycle)", 0, len(batt_df)-1, st.session_state.current_idx)
-    run_days = st.session_state.current_idx / daily_cycles
-    st.sidebar.markdown(f"<div style='text-align: right; color: {sidebar_info_text}; font-size: 0.9rem; margin-top: -15px; margin-bottom: 10px;'>相當於已運轉: <b>{run_days:.1f}</b> 天</div>", unsafe_allow_html=True)
+    st.session_state.current_days = st.sidebar.slider("時間軸模擬 (天)", 0.0, max_days, st.session_state.current_days)
+    st.session_state.current_idx = int(st.session_state.current_days * daily_cycles)
+    st.session_state.current_idx = min(st.session_state.current_idx, len(batt_df) - 1)
+    st.sidebar.markdown(f"<div style='text-align: right; color: {sidebar_info_text}; font-size: 0.9rem; margin-top: -15px; margin-bottom: 10px;'>當前累計循環: <b>{st.session_state.current_idx}</b> 次</div>", unsafe_allow_html=True)
 
 # ==========================================
 # 3. 實時推論與警報邏輯
