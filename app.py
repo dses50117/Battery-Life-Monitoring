@@ -371,14 +371,17 @@ with col_right:
         get_sens_score(row['Vdrop_EMA'], row['Vdrop_EMA_min'], row['Vdrop_EMA_max']),
         (pred_rul_now / batt_df['RUL'].max() * 100)
     ]
-    labels = ['容量保持', '低內阻', '極化穩定', '壓降健康', '壽命預估']
+    labels = ['<b>容量保持</b>', '<b>低內阻</b>', '<b>極化穩定</b>', '<b>壓降健康</b>', '<b>壽命預估</b>']
     fig_radar = go.Figure()
     fig_radar.add_trace(go.Scatterpolar(
         r=scores + [scores[0]], theta=labels + [labels[0]], 
         fill='toself', fillcolor=radar_fill, line=dict(color=radar_line, width=2)
     ))
     fig_radar.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 100], gridcolor=grid_color), angularaxis=dict(gridcolor=grid_color)),
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, 100], gridcolor=grid_color), 
+            angularaxis=dict(gridcolor=grid_color, tickfont=dict(size=14, color=text_color))
+        ),
         template=plotly_template, showlegend=False, height=380, margin=dict(l=40,r=40,t=40,b=40), paper_bgcolor='rgba(0,0,0,0)'
     )
     st.plotly_chart(fig_radar, use_container_width=True)
