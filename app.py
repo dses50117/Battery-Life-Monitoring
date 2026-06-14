@@ -20,79 +20,156 @@ if TORCH_OK:
 # ==========================================
 st.set_page_config(page_title="電池壽命監控看板", layout="wide")
 
-st.markdown("""
+# ==========================================
+# 0. 視覺風格與主題管理
+# ==========================================
+with st.sidebar:
+    st.markdown("<h3 style='border-bottom: 2px solid #555; padding-bottom: 5px; font-size:1.3rem; margin-top: -20px;'>🎨 介面主題</h3>", unsafe_allow_html=True)
+    theme_choice = st.selectbox("視覺風格切換", ["極致深色 (SCADA Black)", "現代明亮 (SCADA White)"])
+    is_dark = (theme_choice == "極致深色 (SCADA Black)")
+
+# 定義不同主題下的配色變數
+if is_dark:
+    bg_color = "#000000"
+    sidebar_bg = "#0a0a0a"
+    sidebar_border = "#1a1a1a"
+    text_color = "#ffffff"
+    sub_text_color = "#ccc"
+    header_border = "#333"
+    kpi_bg = "rgba(255, 255, 255, 0.05)"
+    kpi_border = "#333"
+    kpi_value_color = "#00ffca"
+    chart_border_color = "#00ffca"
+    term_bg = "#050505"
+    term_border = "#333"
+    term_text = "#00ffca"
+    plotly_template = "plotly_dark"
+    grid_color = "#333"
+    radar_fill = "rgba(0, 255, 202, 0.15)"
+    radar_line = "#00ffca"
+    actual_marker_color = "#000000"
+    actual_marker_line = "#ffffff"
+    download_btn_bg = "#2b2b2b"
+    download_btn_border = "#4d4d4d"
+    download_btn_text = "#ffffff"
+    download_btn_hover_border = "#00ffca"
+    download_btn_hover_text = "#00ffca"
+    sidebar_info_bg = "rgba(0, 255, 202, 0.08)"
+    sidebar_info_border = "#00ffca"
+    sidebar_info_text = "#00ffca"
+else:
+    bg_color = "#f8f9fa"
+    sidebar_bg = "#ffffff"
+    sidebar_border = "#e0e0e0"
+    text_color = "#1a1a1a"
+    sub_text_color = "#555"
+    header_border = "#e0e0e0"
+    kpi_bg = "rgba(0, 0, 0, 0.03)"
+    kpi_border = "#e0e0e0"
+    kpi_value_color = "#008080"
+    chart_border_color = "#008080"
+    term_bg = "#f1f2f6"
+    term_border = "#dcdde1"
+    term_text = "#2f3640"
+    plotly_template = "plotly_white"
+    grid_color = "#e0e0e0"
+    radar_fill = "rgba(0, 128, 128, 0.15)"
+    radar_line = "#008080"
+    actual_marker_color = "#ffffff"
+    actual_marker_line = "#1a1a1a"
+    download_btn_bg = "#ffffff"
+    download_btn_border = "#cccccc"
+    download_btn_text = "#1a1a1a"
+    download_btn_hover_border = "#008080"
+    download_btn_hover_text = "#008080"
+    sidebar_info_bg = "rgba(0, 128, 128, 0.06)"
+    sidebar_info_border = "#008080"
+    sidebar_info_text = "#008080"
+
+st.markdown(f"""
 <style>
     /* 隱藏頂部白條與選單 */
-    header { visibility: hidden; height: 0px; }
-    footer { visibility: hidden; }
-    #MainMenu { visibility: hidden; }
+    header {{ visibility: hidden; height: 0px; }}
+    footer {{ visibility: hidden; }}
+    #MainMenu {{ visibility: hidden; }}
 
-    /* 全局背景設為純黑 */
-    .stApp { background-color: #000000; color: #ffffff; }
-    [data-testid="stSidebar"] { background-color: #0a0a0a !important; border-right: 1px solid #1a1a1a; }
+    /* 全局背景與側邊欄 */
+    .stApp {{ background-color: {bg_color}; color: {text_color}; }}
+    [data-testid="stSidebar"] {{ background-color: {sidebar_bg} !important; border-right: 1px solid {sidebar_border}; }}
     
-    /* 強制文字白化 */
-    .stWidgetLabel p, label, .stMarkdown p, [data-testid="stWidgetLabel"], [data-testid="stCheckbox"] label span {
-        color: #ffffff !important; font-weight: bold !important;
-    }
+    /* 強制文字顏色 */
+    .stWidgetLabel p, label, .stMarkdown p, [data-testid="stWidgetLabel"], [data-testid="stCheckbox"] label span {{
+        color: {text_color} !important; font-weight: bold !important;
+    }}
 
     /* 自訂 UI 元件 */
-    .pro-header { background-color: #000000; border-bottom: 2px solid #333; padding: 20px; margin-top: -80px; margin-bottom: 25px; text-align: center; }
-    .pro-title { color: #ffffff; font-size: 1.8rem; font-weight: bold; letter-spacing: 2px; }
-    .kpi-container { text-align: center; padding: 15px; background: rgba(255, 255, 255, 0.05); border: 1px solid #333; border-radius: 8px; }
-    .kpi-value { font-size: 3rem; font-weight: 400; }
-    .kpi-label { font-size: 0.8rem; color: #ffffff; text-transform: uppercase; }
-    .chart-title { color: #ffffff; font-size: 1rem; border-left: 4px solid #00ffca; padding-left: 10px; margin-top: 10px; margin-bottom: 10px; }
-    .terminal-log { font-family: 'Courier New', monospace; color: #00ffca; font-size: 0.85rem; padding: 10px; background: #050505; border: 1px solid #333; border-radius: 5px; }
+    .pro-header {{ background-color: {bg_color}; border-bottom: 2px solid {header_border}; padding: 20px; margin-top: -80px; margin-bottom: 25px; text-align: center; }}
+    .pro-title {{ color: {text_color}; font-size: 1.8rem; font-weight: bold; letter-spacing: 2px; }}
+    .kpi-container {{ text-align: center; padding: 15px; background: {kpi_bg}; border: 1px solid {kpi_border}; border-radius: 8px; }}
+    .kpi-value {{ font-size: 3rem; font-weight: 400; color: {kpi_value_color}; }}
+    .kpi-label {{ font-size: 0.8rem; color: {text_color}; text-transform: uppercase; }}
+    .chart-title {{ color: {text_color}; font-size: 1rem; border-left: 4px solid {chart_border_color}; padding-left: 10px; margin-top: 10px; margin-bottom: 10px; }}
+    .terminal-log {{ font-family: 'Courier New', monospace; color: {term_text}; font-size: 0.85rem; padding: 10px; background: {term_bg}; border: 1px solid {term_border}; border-radius: 5px; }}
     
-    /* 避免 Auto-refresh 產生右上角閃爍的小人 (Running Indicator) 或降低整個畫面透明度 */
-    div[data-testid="stStatusWidget"] { visibility: hidden !important; height: 0px !important; position: fixed !important; }
-    .stApp > header { background-color: transparent !important; }
+    /* 避免 Auto-refresh 產生右上角閃爍的小人 */
+    div[data-testid="stStatusWidget"] {{ visibility: hidden !important; height: 0px !important; position: fixed !important; }}
+    .stApp > header {{ background-color: transparent !important; }}
 
     /* 徹底消除 Streamlit 重新載入時畫面的變暗與變亮閃爍 */
     .stApp, 
     div[data-testid="stAppViewContainer"], 
     div[data-testid="stAppViewBlockContainer"], 
     div[data-testid="stMain"],
-    [data-testid="stAppViewBlockContainer"] {
+    [data-testid="stAppViewBlockContainer"] {{
         opacity: 1.0 !important;
         filter: none !important;
         transition: none !important;
         animation: none !important;
-    }
+    }}
 
     /* 當處於運行狀態時也強行保持不透明 */
     [data-st-mode="running"] .stApp,
     [data-st-mode="running"] div[data-testid="stAppViewContainer"],
     [data-st-mode="running"] div[data-testid="stAppViewBlockContainer"],
-    [data-st-mode="running"] div[data-testid="stMain"] {
+    [data-st-mode="running"] div[data-testid="stMain"] {{
         opacity: 1.0 !important;
         filter: none !important;
-    }
+    }}
 
-    /* 徹底消滅 Plotly 重新渲染時的白色瞬閃 (純黑底色覆蓋) */
+    /* 徹底消滅 Plotly 重新渲染時的白色瞬閃 (動態主題底色覆蓋) */
     .js-plotly-plot, .plotly, .plot-container, .main-svg,
     div[data-testid="stPlotlyChart"],
-    div[data-testid="stPlotlyChart"] > div {
-        background-color: #000000 !important;
-        background: #000000 !important;
+    div[data-testid="stPlotlyChart"] > div {{
+        background-color: {bg_color} !important;
+        background: {bg_color} !important;
         opacity: 1.0 !important;
         transition: none !important;
         animation: none !important;
-    }
+    }}
     
     /* 強制 Plotly 的載入 iframe 底色為透明，避免白底瞬閃 */
-    iframe[title="streamlit.plotly_chart"] {
+    iframe[title="streamlit.plotly_chart"] {{
         background-color: transparent !important;
         background: transparent !important;
         opacity: 1.0 !important;
         transition: none !important;
-    }
+    }}
 
-    /* 鎖定圖表容器之最小高度，防止圖表在重新繪製時產生高度塌陷 (Layout Shift) */
-    div[data-testid="stPlotlyChart"]:nth-of-type(1) { min-height: 280px !important; }
-    div[data-testid="stPlotlyChart"]:nth-of-type(2) { min-height: 240px !important; }
-    div[data-testid="stPlotlyChart"]:nth-of-type(3) { min-height: 380px !important; }
+    /* 鎖定圖表容器之最小高度，防止圖表在重新繪製時產生高度塌陷 */
+    div[data-testid="stPlotlyChart"]:nth-of-type(1) {{ min-height: 280px !important; }}
+    div[data-testid="stPlotlyChart"]:nth-of-type(2) {{ min-height: 240px !important; }}
+    div[data-testid="stPlotlyChart"]:nth-of-type(3) {{ min-height: 380px !important; }}
+    
+    /* 自訂下載按鈕樣式 */
+    .stDownloadButton button {{
+        background-color: {download_btn_bg} !important;
+        color: {download_btn_text} !important;
+        border: 1px solid {download_btn_border} !important;
+    }}
+    .stDownloadButton button:hover {{
+        border-color: {download_btn_hover_border} !important;
+        color: {download_btn_hover_text} !important;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -207,9 +284,9 @@ if auto_play:
     
     run_days = st.session_state.current_idx / daily_cycles
     st.sidebar.markdown(f"""
-    <div style='padding: 10px; background: rgba(0, 255, 202, 0.1); border: 1px solid #00ffca; border-radius: 5px; text-align: center; margin-top: 10px; margin-bottom: 15px;'>
-         <div style='font-size: 0.85rem; color: #ccc;'>▶️ 自動播放進度 (Cycle {st.session_state.current_idx})</div>
-         <div style='font-size: 1.4rem; color: #00ffca; font-weight: bold;'>相當於已運轉 {run_days:.1f} 天</div>
+    <div style='padding: 10px; background: {sidebar_info_bg}; border: 1px solid {sidebar_info_border}; border-radius: 5px; text-align: center; margin-top: 10px; margin-bottom: 15px;'>
+         <div style='font-size: 0.85rem; color: {sub_text_color};'>▶️ 自動播放進度 (Cycle {st.session_state.current_idx})</div>
+         <div style='font-size: 1.4rem; color: {sidebar_info_text}; font-weight: bold;'>相當於已運轉 {run_days:.1f} 天</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -218,7 +295,7 @@ if auto_play:
 else:
     st.session_state.current_idx = st.sidebar.slider("時間軸模擬 (Cycle)", 0, len(batt_df)-1, st.session_state.current_idx)
     run_days = st.session_state.current_idx / daily_cycles
-    st.sidebar.markdown(f"<div style='text-align: right; color: #00ffca; font-size: 0.9rem; margin-top: -15px; margin-bottom: 10px;'>相當於已運轉: <b>{run_days:.1f}</b> 天</div>", unsafe_allow_html=True)
+    st.sidebar.markdown(f"<div style='text-align: right; color: {sidebar_info_text}; font-size: 0.9rem; margin-top: -15px; margin-bottom: 10px;'>相當於已運轉: <b>{run_days:.1f}</b> 天</div>", unsafe_allow_html=True)
 
 # ==========================================
 # 3. 實時推論與警報邏輯
@@ -233,14 +310,14 @@ if row['SOH'] < 70.0:
 elif row['SOH'] < 85.0:
     alarm_status, alarm_color = "WARNING (偏離/注意)", "#ffb300"
 else:
-    alarm_status, alarm_color = "ONLINE (正常運轉)", "#00ffca"
+    alarm_status, alarm_color = "ONLINE (正常運轉)", radar_line
 
 # ==========================================
 # 4. 畫面渲染
 # ==========================================
 k1, k2, k3, k4 = st.columns(4)
-k1.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:#00ffca'>{pred_rul_now}</div><div class='kpi-label'>AI 預測 RUL (Cycles)</div></div>", unsafe_allow_html=True)
-k2.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:#00ffca'>{rem_years:.1f}</div><div class='kpi-label'>預估可用年資</div></div>", unsafe_allow_html=True)
+k1.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{kpi_value_color}'>{pred_rul_now}</div><div class='kpi-label'>AI 預測 RUL (Cycles)</div></div>", unsafe_allow_html=True)
+k2.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{kpi_value_color}'>{rem_years:.1f}</div><div class='kpi-label'>預估可用年資</div></div>", unsafe_allow_html=True)
 k3.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{alarm_color}'>{row['SOH']:.1f}%</div><div class='kpi-label'>健康評分 (SOH)</div></div>", unsafe_allow_html=True)
 k4.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{alarm_color}; font-size:1.4rem; height:4.5rem; display:flex; align-items:center; justify-content:center;'>{alarm_status}</div><div class='kpi-label'>機櫃狀態</div></div>", unsafe_allow_html=True)
 
@@ -253,16 +330,18 @@ with col_left:
     fig_traj = go.Figure()
     fig_traj.add_trace(go.Scatter(
         x=batt_df.index[:st.session_state.current_idx+1], y=batt_df['RUL'].iloc[:st.session_state.current_idx+1], 
-        name="實際 RUL", mode='markers', marker=dict(color='#000000', size=6, line=dict(color='#ffffff', width=1))
+        name="實際 RUL", mode='markers', marker=dict(color=actual_marker_color, size=6, line=dict(color=actual_marker_line, width=1))
     ))
-    fig_traj.add_trace(go.Scatter(x=batt_df.index, y=y_mono, name="AI 預測路徑", line=dict(color='#00ffca', width=4)))
+    fig_traj.add_trace(go.Scatter(x=batt_df.index, y=y_mono, name="AI 預測路徑", line=dict(color=radar_line, width=4)))
     fig_traj.add_vline(x=st.session_state.current_idx, line_dash="dash", line_color="#ff4040")
     
     fig_traj.update_layout(
-        template="plotly_dark", height=280, margin=dict(l=10,r=10,t=10,b=10),
+        template=plotly_template, height=280, margin=dict(l=10,r=10,t=10,b=10),
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#ffffff'),
-        legend=dict(font=dict(color='#ffffff'))
+        font=dict(color=text_color),
+        legend=dict(font=dict(color=text_color)),
+        xaxis=dict(gridcolor=grid_color),
+        yaxis=dict(gridcolor=grid_color)
     )
     st.plotly_chart(fig_traj, use_container_width=True)
 
@@ -277,11 +356,12 @@ with col_left:
     fig_soh.add_vline(x=st.session_state.current_idx, line_dash="dash", line_color="#ff4040")
     
     fig_soh.update_layout(
-        template="plotly_dark", height=240, margin=dict(l=10,r=10,t=10,b=10),
+        template=plotly_template, height=240, margin=dict(l=10,r=10,t=10,b=10),
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#ffffff'),
-        legend=dict(font=dict(color='#ffffff')),
-        yaxis=dict(range=[0, 105], gridcolor='#333')
+        font=dict(color=text_color),
+        legend=dict(font=dict(color=text_color)),
+        xaxis=dict(gridcolor=grid_color),
+        yaxis=dict(range=[0, 105], gridcolor=grid_color)
     )
     st.plotly_chart(fig_soh, use_container_width=True)
 
@@ -303,11 +383,11 @@ with col_right:
     fig_radar = go.Figure()
     fig_radar.add_trace(go.Scatterpolar(
         r=scores + [scores[0]], theta=labels + [labels[0]], 
-        fill='toself', fillcolor='rgba(0, 255, 202, 0.15)', line=dict(color='#00ffca', width=2)
+        fill='toself', fillcolor=radar_fill, line=dict(color=radar_line, width=2)
     ))
     fig_radar.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 100], gridcolor='#333'), angularaxis=dict(gridcolor='#333')),
-        template="plotly_dark", showlegend=False, height=380, margin=dict(l=40,r=40,t=40,b=40), paper_bgcolor='rgba(0,0,0,0)'
+        polar=dict(radialaxis=dict(visible=True, range=[0, 100], gridcolor=grid_color), angularaxis=dict(gridcolor=grid_color)),
+        template=plotly_template, showlegend=False, height=380, margin=dict(l=40,r=40,t=40,b=40), paper_bgcolor='rgba(0,0,0,0)'
     )
     st.plotly_chart(fig_radar, use_container_width=True)
 
