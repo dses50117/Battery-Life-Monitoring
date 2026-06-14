@@ -1,0 +1,12 @@
+{
+  "base_alpha": 15.0,
+  "lgbm_max_depth": 5,
+  "lgbm_learning_rate": 0.009,
+  "lgbm_reg_lambda": 22.0,
+  "et_depth": 8,
+  "et_leaf": 9,
+  "lambda_ET": 0.12,
+  "lambda_LGBM": 0.1,
+  "lambda_Huber": 0.05,
+  "lambda_KAN": 0.9
+}
