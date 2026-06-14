@@ -6,8 +6,14 @@ import joblib
 from streamlit_autorefresh import st_autorefresh
 from sklearn.isotonic import IsotonicRegression
 from fpdf import FPDF
-import base64
 import os
+
+# Import modules and definitions from train_model.py
+import train_model
+
+TORCH_OK = train_model.TORCH_OK
+if TORCH_OK:
+    import torch
 
 # ==========================================
 # 0. 頁面配置與極致黑 SCADA 風格 (Demo 單檔版 CSS)
@@ -41,8 +47,28 @@ st.markdown("""
     
     /* 避免 Auto-refresh 產生右上角閃爍的小人 (Running Indicator) 或降低整個畫面透明度 */
     div[data-testid="stStatusWidget"] { visibility: hidden !important; height: 0px !important; position: fixed !important; }
-    [data-testid="stAppViewBlockContainer"] { transition: none !important; animation: none !important; opacity: 1 !important; filter: none !important; }
     .stApp > header { background-color: transparent !important; }
+
+    /* 徹底消除 Streamlit 重新載入時畫面的變暗與變亮閃爍 */
+    .stApp, 
+    div[data-testid="stAppViewContainer"], 
+    div[data-testid="stAppViewBlockContainer"], 
+    div[data-testid="stMain"],
+    [data-testid="stAppViewBlockContainer"] {
+        opacity: 1.0 !important;
+        filter: none !important;
+        transition: none !important;
+        animation: none !important;
+    }
+
+    /* 當處於運行狀態時也強行保持不透明 */
+    [data-st-mode="running"] .stApp,
+    [data-st-mode="running"] div[data-testid="stAppViewContainer"],
+    [data-st-mode="running"] div[data-testid="stAppViewBlockContainer"],
+    [data-st-mode="running"] div[data-testid="stMain"] {
+        opacity: 1.0 !important;
+        filter: none !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -51,61 +77,95 @@ st.markdown("<div class='pro-header'><div class='pro-title'>智慧儲能機櫃�
 # ==========================================
 # 1. 數據與推論引擎層 (Functions)
 # ==========================================
+@st.cache_resource
+def load_research_model():
+    return joblib.load("probms_model.pkl")
+
+model_pkg = load_research_model()
+
 @st.cache_data(show_spinner="⏳ 正在同步數據...", ttl=3600)
 def get_advanced_data(file_path):
-    df = pd.read_csv(file_path)
-    df["Discharge Time (s)"] = df["Discharge Time (s)"].clip(upper=10000)
+    df_raw = pd.read_csv(file_path)
+    # Apply cleaning and feature engineering using train_model setup
+    df_clean = train_model.apply_cleaning(df_raw, model_pkg["clean_params"])
+    df = train_model.engineer_features(df_clean)
     
-    c = pd.to_numeric(df["Cycle_Index"], errors="coerce").fillna(0).values
-    df["Battery_ID"] = np.cumsum((c[1:] <= c[:-1]).astype(int).tolist() + [0])
-    df = df.sort_values(["Battery_ID", "Cycle_Index"]).reset_index(drop=True)
-    
-    df["Cap"] = df["Discharge Time (s)"].astype(float)
-    df["IR"]  = (4.2 - df["Max. Voltage Dischar. (V)"]).astype(float)
-    df["CV_Ratio"] = (df["Time at 4.15V (s)"] / (df["Charging time (s)"] + 1e-6)).astype(float)
-    df["VD"]  = df["Decrement 3.6-3.4V (s)"].astype(float)
-    
-    for col in ["Cap", "IR", "CV_Ratio"]:
-        init = df.groupby("Battery_ID")[col].transform("first")
-        df[f"{col}_Ret"] = df[col] / (init + 1e-6)
-        df[f"{col}_EMA"] = df.groupby("Battery_ID")[f"{col}_Ret"].transform(lambda x: x.ewm(alpha=0.1, adjust=False).mean())
-        df[f"{col}_rm20"] = df.groupby("Battery_ID")[f"{col}_EMA"].transform(lambda x: x.rolling(20, min_periods=1).mean())
-    
+    # Calculate health parameters for visualization
     df["Max_Cap_Found"] = df.groupby("Battery_ID")["Cap_EMA"].transform(lambda x: x.quantile(0.95))
     df["SOH"] = (df["Cap_EMA"] / df["Max_Cap_Found"]) * 100
     df["SOH"] = df["SOH"].clip(0.0, 100.0)
     
-    df["Tau"] = (1.0 / (1.0 + np.exp(-df["Cap_EMA"]))).clip(0.0, 1.0)
-    df["Cum_Ah_log1p"] = np.log1p(df.groupby("Battery_ID")["Cap"].cumsum())
-    
-    for feat in ["Cap_EMA", "IR_EMA", "CV_Ratio_EMA", "VD"]:
+    for feat in ["Cap_EMA", "IR_EMA", "CV_Ratio_EMA", "Vdrop_EMA"]:
         df[f"{feat}_min"] = df.groupby("Battery_ID")[feat].transform(lambda x: x.quantile(0.05))
         df[f"{feat}_max"] = df.groupby("Battery_ID")[feat].transform(lambda x: x.quantile(0.95))
         
     return df.fillna(0.0)
 
-@st.cache_resource
-def load_research_model():
-    return joblib.load("probms_model.pkl")
-
 def infer_battery(batt_df, model_pkg):
-    X_c_sc = model_pkg["sc_clock"].transform(batt_df[model_pkg["clock_feats"]])
-    y_base = model_pkg["base_model"].predict(X_c_sc)
-    X_p_sc = model_pkg["sc_phys"].transform(batt_df[model_pkg["s1_feats"]])
+    # 1. Ridge Baseline Prediction
+    X_base = model_pkg["sc_base"].transform(batt_df[model_pkg["clock_feats"]].values)
+    y_base = np.clip(model_pkg["base_model"].predict(X_base), 0.0, model_pkg["max_clip"])
 
-    P = np.column_stack([
-        model_pkg["xgb_model"].predict(X_p_sc), model_pkg["et_model"].predict(X_p_sc),
-        model_pkg["hgb_model"].predict(X_p_sc), model_pkg["lin_model"].predict(X_p_sc), np.ones(len(batt_df))
-    ])
-    y_res = P @ model_pkg["nnls_w"]
-    y_final = np.clip(y_base + y_res, 0.0, model_pkg["max_clip"])
-    return IsotonicRegression(increasing=False, out_of_bounds="clip").fit_transform(batt_df.index.astype(float), y_final)
+    # 2. Gated Residual Ensemble Prediction
+    X_res = model_pkg["sc"].transform(batt_df[model_pkg["residual_feats"]].values)
+    
+    pred_et = np.zeros(len(batt_df))
+    for m in model_pkg["et_models"]:
+        pred_et += m.predict(X_res) / len(model_pkg["et_models"])
+        
+    pred_lgbm = np.zeros(len(batt_df))
+    for m in model_pkg["lgbm_models"]:
+        pred_lgbm += m.predict(X_res) / len(model_pkg["lgbm_models"])
+        
+    pred_huber = np.zeros(len(batt_df))
+    for m in model_pkg["huber_models"]:
+        if m is not None:
+            pred_huber += m.predict(X_res) / len(model_pkg["huber_models"])
+            
+    # Combine gated ensemble residuals
+    et_gate = model_pkg["et_gate"]
+    lgbm_gate = model_pkg["lgbm_gate"]
+    huber_gate = model_pkg["huber_gate"]
+    
+    y_gated = y_base + (et_gate * pred_et + lgbm_gate * pred_lgbm + huber_gate * pred_huber)
+    y_gated = np.clip(y_gated, 0.0, model_pkg["max_clip"])
+
+    # 3. Physics KAN Refinement
+    kan_pred = np.zeros(len(batt_df))
+    if TORCH_OK and model_pkg["kan_state_dict"] is not None:
+        try:
+            kan_model = train_model.PhysicsKANRefiner(in_dim=len(model_pkg["kan_feats"]), hidden_dim=4)
+            kan_model.load_state_dict(model_pkg["kan_state_dict"])
+            kan_model.to(train_model.DEVICE)
+            kan_model.eval()
+            
+            X_kan = model_pkg["sc_kan"].transform(batt_df[model_pkg["kan_feats"]].values)
+            tau = np.clip(batt_df["Tau_rm20"].values if "Tau_rm20" in batt_df.columns else batt_df["Tau"].values, 0.0, 1.0)
+            amp = 3.0 + 17.0 * tau
+            
+            with torch.no_grad():
+                Xt = torch.tensor(X_kan, dtype=torch.float32, device=train_model.DEVICE)
+                at = torch.tensor(amp, dtype=torch.float32, device=train_model.DEVICE)
+                kan_pred = kan_model(Xt, at).cpu().numpy()
+        except Exception as e:
+            pass
+
+    y_full = np.clip(y_gated + model_pkg["lambda_KAN"] * kan_pred, 0.0, model_pkg["max_clip"])
+
+    # 4. Train-Only Piecewise Post-Calibration & Causal PIMS
+    y_cal, _ = train_model.apply_train_only_post_calibrator(
+        batt_df,
+        y_full,
+        model_pkg["post_cal"],
+        model_pkg["max_clip"]
+    )
+    
+    return y_cal
 
 # ==========================================
 # 2. 啟動與狀態管理
 # ==========================================
 df_all = get_advanced_data("Battery_RUL.csv")
-model_pkg = load_research_model()
 
 with st.sidebar:
     st.markdown("<h2 style='color:#ffffff; border-bottom: 2px solid #444;'>⚙️ 控制台</h2>", unsafe_allow_html=True)
@@ -124,8 +184,8 @@ if auto_play:
     run_days = st.session_state.current_idx / daily_cycles
     st.sidebar.markdown(f"""
     <div style='padding: 10px; background: rgba(0, 255, 202, 0.1); border: 1px solid #00ffca; border-radius: 5px; text-align: center; margin-top: 10px; margin-bottom: 15px;'>
-        <div style='font-size: 0.85rem; color: #ccc;'>▶️ 自動播放進度 (Cycle {st.session_state.current_idx})</div>
-        <div style='font-size: 1.4rem; color: #00ffca; font-weight: bold;'>相當於已運轉 {run_days:.1f} 天</div>
+         <div style='font-size: 0.85rem; color: #ccc;'>▶️ 自動播放進度 (Cycle {st.session_state.current_idx})</div>
+         <div style='font-size: 1.4rem; color: #00ffca; font-weight: bold;'>相當於已運轉 {run_days:.1f} 天</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -161,8 +221,6 @@ k3.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{al
 k4.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{alarm_color}; font-size:1.4rem; height:4.5rem; display:flex; align-items:center; justify-content:center;'>{alarm_status}</div><div class='kpi-label'>機櫃狀態</div></div>", unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
-
-
 
 col_left, col_right = st.columns([2, 1.2])
 
@@ -214,7 +272,7 @@ with col_right:
         get_sens_score(row['Cap_EMA'], row['Cap_EMA_min'], row['Cap_EMA_max']),
         get_sens_score(row['IR_EMA'], row['IR_EMA_min'], row['IR_EMA_max'], inv=True),
         get_sens_score(row['CV_Ratio_EMA'], row['CV_Ratio_EMA_min'], row['CV_Ratio_EMA_max']),
-        get_sens_score(row['VD'], row['VD_min'], row['VD_max']),
+        get_sens_score(row['Vdrop_EMA'], row['Vdrop_EMA_min'], row['Vdrop_EMA_max']),
         (pred_rul_now / batt_df['RUL'].max() * 100)
     ]
     labels = ['容量保持', '低內阻', '極化穩定', '壓降健康', '壽命預估']
@@ -237,7 +295,6 @@ def generate_pdf(batt_id, current_cycle, rul, rem_years, soh, status, clip_count
     pdf.add_page()
     
     # 載入同目錄下的免費開源字型 (Noto Sans TC) 來支援繁體中文
-    import os
     font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NotoSansTC.ttf")
     if os.path.exists(font_path):
         pdf.add_font("NotoSans", "", font_path)
@@ -320,7 +377,7 @@ with col_log:
     st.markdown("<div class='chart-title'>📋 專家系統診斷與稽核日誌</div>", unsafe_allow_html=True)
     st.markdown(f"""
     <div class='terminal-log'>
-    [SYS] 單檔 Demo 模式啟動，使用前端定時器優化效能。<br>
+    [SYS] 儲能系統全局推論模組已對接 Q-PEAK (ET + LGBM + Huber + KAN) 架構。<br>
     [EVENT] 本機櫃共觸發 {clip_count} 次放電時間上限保護。<br>
     [LOG] 2026-03-01 | 機櫃 #{selected_id:03d} | 當前 SOH: {row['SOH']:.1f}% | 狀態判定: <span style='color:{alarm_color}'>{alarm_status}</span>
     </div>
