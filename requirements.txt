@@ -8,3 +8,6 @@ joblib
 streamlit-autorefresh
 fpdf2
 Pillow
+lightgbm
+matplotlib
+seaborn
