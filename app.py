@@ -300,9 +300,12 @@ rem_years = pred_rul_now / (daily_cycles * 365)
 if row['SOH'] < 70.0:
     alarm_status, alarm_color = "CRITICAL (立即停機)", "#ff4040"
 elif row['SOH'] < 85.0:
-    alarm_status, alarm_color = "WARNING (偏離/注意)", "#ffb300"
+    alarm_status, alarm_color = "WARNING (偏離/注意)", ("#d35400" if not is_dark else "#ffb300")
 else:
     alarm_status, alarm_color = "ONLINE (正常運轉)", radar_line
+
+# For warning status under light theme, make the font weight bold for health score and cabinet status
+kpi_weight_style = "font-weight: bold !important;" if (row['SOH'] >= 70.0 and row['SOH'] < 85.0 and not is_dark) else ""
 
 # ==========================================
 # 4. 畫面渲染
@@ -310,8 +313,8 @@ else:
 k1, k2, k3, k4 = st.columns(4)
 k1.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{kpi_value_color}'>{pred_rul_now}</div><div class='kpi-label'>AI 預測 RUL (Cycles)</div></div>", unsafe_allow_html=True)
 k2.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{kpi_value_color}'>{rem_years:.1f}</div><div class='kpi-label'>預估可用年資</div></div>", unsafe_allow_html=True)
-k3.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{alarm_color}'>{row['SOH']:.1f}%</div><div class='kpi-label'>健康評分 (SOH)</div></div>", unsafe_allow_html=True)
-k4.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{alarm_color}; font-size:1.4rem; height:4.5rem; display:flex; align-items:center; justify-content:center;'>{alarm_status}</div><div class='kpi-label'>機櫃狀態</div></div>", unsafe_allow_html=True)
+k3.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{alarm_color}; {kpi_weight_style}'>{row['SOH']:.1f}%</div><div class='kpi-label'>健康評分 (SOH)</div></div>", unsafe_allow_html=True)
+k4.markdown(f"<div class='kpi-container'><div class='kpi-value' style='color:{alarm_color}; {kpi_weight_style} font-size:1.4rem; height:4.5rem; display:flex; align-items:center; justify-content:center;'>{alarm_status}</div><div class='kpi-label'>機櫃狀態</div></div>", unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
